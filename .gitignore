@@ -1,0 +1,8 @@
+node_modules/
+*.tsbuildinfo
+
+# harness configs mounted into this repo by the plugin itself
+.cursor/
+.kiro/
+.mcp.json
+*.agent-kit.bak
