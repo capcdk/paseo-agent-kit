@@ -6,6 +6,7 @@ import { Icon, ScrollView, TextInput, useToast } from "@getpaseo/plugin/client/r
 import {
   kitStatusRpc,
   importRpc,
+  localeRpc,
   mountRpc,
   probeRpc,
   trustRpc,
@@ -16,6 +17,7 @@ import {
   type LoadState,
   type ProjectBoard,
 } from "../shared/api";
+import { detectLocale, LOCALE_PREFS, resolveLocale, translate, type LocalePref, type MessageKey, type Vars } from "../shared/i18n";
 
 export const APP_NAME = "Agent Kit";
 
@@ -24,17 +26,18 @@ type Kind = "mcp" | "skill";
 type DotState = LoadState | "pending";
 type Cell = { state: LoadState; detail: string };
 type ProbeState = { status: "loading" } | { status: "done"; cells: Record<string, Cell> } | { status: "error"; message: string };
+type Tr = (key: MessageKey, vars?: Vars) => string;
 
-const STATE_LABEL: Record<DotState, string> = {
-  loaded: "已加载",
-  approval: "待信任",
-  auth: "需授权",
-  failed: "未加载",
-  unknown: "不报告",
-  pending: "检测中",
+const STATE_KEY: Record<DotState, MessageKey> = {
+  loaded: "stateLoaded",
+  approval: "stateApproval",
+  auth: "stateAuth",
+  failed: "stateFailed",
+  unknown: "stateUnknown",
+  pending: "statePending",
 };
 
-const KIND_LABEL: Record<Kind, string> = { mcp: "MCP", skill: "Skill" };
+const KIND_KEY: Record<Kind, MessageKey> = { mcp: "kindMcp", skill: "kindSkill" };
 
 function cellKey(kind: Kind, name: string, harness: string): string {
   return `${kind}:${name}:${harness}`;
@@ -204,7 +207,7 @@ function Segmented<Value extends string>({
   theme,
   onChange,
 }: {
-  options: readonly { value: Value; label: string; count: string }[];
+  options: readonly { value: Value; label: string; count?: string }[];
   value: Value;
   theme: Theme;
   onChange: (value: Value) => void;
@@ -243,7 +246,7 @@ function Segmented<Value extends string>({
             <Text style={{ color: active ? theme.colors.foreground : theme.colors.foregroundMuted, fontSize: 13, fontWeight: "600" }}>
               {option.label}
             </Text>
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{option.count}</Text>
+            {option.count ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{option.count}</Text> : null}
           </Pressable>
         );
       })}
@@ -255,11 +258,13 @@ function ProjectChips({
   projects,
   selectedId,
   theme,
+  tr,
   onSelect,
 }: {
   projects: readonly ProjectBoard[];
   selectedId: string | null;
   theme: Theme;
+  tr: Tr;
   onSelect: (projectId: string) => void;
 }) {
   return (
@@ -272,7 +277,7 @@ function ProjectChips({
             key={project.projectId}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
-            accessibilityLabel={`${project.name}，已挂载 ${mounted} 项`}
+            accessibilityLabel={tr("projectChip", { name: project.name, count: mounted })}
             onPress={() => onSelect(project.projectId)}
             style={{
               flexDirection: "row",
@@ -332,6 +337,7 @@ function ItemRow({
   compact,
   last,
   theme,
+  tr,
   onToggleExpand,
   onMount,
   onUserLevel,
@@ -348,10 +354,11 @@ function ItemRow({
   compact: boolean;
   last: boolean;
   theme: Theme;
+  tr: Tr;
   onToggleExpand: () => void;
   onMount: (mount: boolean) => void;
   onUserLevel: (userLevel: boolean) => void;
-  onTrust: () => void;
+  onTrust: (harness: HarnessColumn) => void;
 }) {
   const states = harnesses.map((harness) => {
     const cell = cells[cellKey(kind, item.name, harness.id)];
@@ -359,8 +366,8 @@ function ItemRow({
     return { harness, state, detail: cell?.detail ?? (probe?.status === "error" ? probe.message : "") };
   });
   const global = item.userLevel;
-  const cursorBlind = kind === "skill" && !item.userLevel;
-  const needsTrust = states.some(({ harness, state }) => harness.id === "cursor" && state === "approval");
+  const blind = kind === "skill" && !item.userLevel ? harnesses.filter((harness) => !harness.projectSkills) : [];
+  const needsTrust = states.filter(({ harness, state }) => harness.canApprove && state === "approval").map(({ harness }) => harness);
   const badges = (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
       {states.map(({ harness, state }) => (
@@ -373,7 +380,7 @@ function ItemRow({
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 10 }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${expanded ? "收起" : "展开"} ${item.name} 的加载详情`}
+          accessibilityLabel={tr(expanded ? "rowCollapse" : "rowExpand", { name: item.name })}
           onPress={onToggleExpand}
           style={{ flex: 1, flexDirection: compact ? "column" : "row", alignItems: compact ? "flex-start" : "center", gap: compact ? 6 : 12 }}
         >
@@ -386,51 +393,54 @@ function ItemRow({
               <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, fontFamily: "Menlo" }} numberOfLines={1}>
                 {item.summary}
               </Text>
-              {cursorBlind ? (
+              {blind.length > 0 ? (
                 <Text style={{ color: theme.colors.statusWarning, fontSize: 11 }} numberOfLines={1}>
-                  仅项目级：Cursor 会话中不可用
+                  {tr("projectOnlyBlind", { harnesses: blind.map((harness) => harness.label).join(tr("listSep")) })}
                 </Text>
               ) : null}
             </View>
           </View>
           {compact ? <View style={{ paddingLeft: 20 }}>{badges}</View> : badges}
         </Pressable>
-        {needsTrust ? <Button label="信任" icon="ShieldCheck" theme={theme} disabled={busy} onPress={onTrust} /> : null}
+        {needsTrust.map((harness) => (
+          <Button
+            key={harness.id}
+            label={tr("trust", { harness: harness.label })}
+            icon="ShieldCheck"
+            theme={theme}
+            disabled={busy}
+            onPress={() => onTrust(harness)}
+          />
+        ))}
         <View style={{ alignItems: "center", gap: 3 }}>
-          <LockHint reason={item.globalLock ? `无法关闭全局：${item.globalLock}` : null} theme={theme}>
+          <LockHint reason={item.globalLock ? tr("globalLockHint", { reason: item.globalLock }) : null} theme={theme}>
             <Toggle
               value={item.userLevel}
               disabled={busy || item.globalLock !== null}
               label={
                 item.globalLock
-                  ? `${item.name} 锁定为全局：${item.globalLock}`
-                  : item.userLevel
-                    ? `取消 ${item.name} 的用户级加载`
-                    : `让 ${item.name} 在所有会话加载`
+                  ? tr("a11yGlobalLocked", { name: item.name, reason: item.globalLock })
+                  : tr(item.userLevel ? "a11yGlobalOff" : "a11yGlobalOn", { name: item.name })
               }
               theme={theme}
               onChange={onUserLevel}
             />
           </LockHint>
-          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>全局</Text>
+          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>{tr("global")}</Text>
         </View>
         <View style={{ alignItems: "center", gap: 3 }}>
-          <LockHint reason={global ? "已全局加载，所有项目都会生效；先关闭「全局」才能按项目挂载" : null} theme={theme}>
+          <LockHint reason={global ? tr("projectLockHint") : null} theme={theme}>
             <Toggle
               value={global || mounted}
               disabled={busy || global}
               label={
-                global
-                  ? `${item.name} 已全局加载，项目挂载不可调整`
-                  : mounted
-                    ? `从当前项目卸载 ${item.name}`
-                    : `挂载 ${item.name} 到当前项目`
+                tr(global ? "a11yMountLocked" : mounted ? "a11yUnmount" : "a11yMount", { name: item.name })
               }
               theme={theme}
               onChange={onMount}
             />
           </LockHint>
-          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>项目</Text>
+          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>{tr("project")}</Text>
         </View>
       </View>
       {expanded ? (
@@ -441,7 +451,7 @@ function ItemRow({
                 <Dot state={state} theme={theme} size={6} />
                 <Text style={{ color: theme.colors.foreground, fontSize: 11 }}>{harness.label}</Text>
               </View>
-              <Text style={{ width: 44, color: stateColor(state, theme), fontSize: 11 }}>{STATE_LABEL[state]}</Text>
+              <Text style={{ width: 72, color: stateColor(state, theme), fontSize: 11 }}>{tr(STATE_KEY[state])}</Text>
               <Text style={{ flex: 1, color: theme.colors.foregroundMuted, fontSize: 11, fontFamily: "Menlo" }} numberOfLines={3}>
                 {detail || "—"}
               </Text>
@@ -453,14 +463,14 @@ function ItemRow({
   );
 }
 
-function Legend({ theme }: { theme: Theme }) {
+function Legend({ theme, tr }: { theme: Theme; tr: Tr }) {
   const items: LoadState[] = ["loaded", "approval", "auth", "failed", "unknown"];
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
       {items.map((state) => (
         <View key={state} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
           <Dot state={state} theme={theme} size={6} />
-          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{STATE_LABEL[state]}</Text>
+          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{tr(STATE_KEY[state])}</Text>
         </View>
       ))}
     </View>
@@ -496,7 +506,9 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
   const requestMount = useRpc(mountRpc);
   const requestUserLevel = useRpc(userLevelRpc);
   const requestTrust = useRpc(trustRpc);
+  const requestLocale = useRpc(localeRpc);
   const toast = useToast();
+  const deviceLocale = useMemo(() => detectLocale(), []);
   const [status, setStatus] = useState<KitStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -512,7 +524,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
     setLoading(true);
     setError(null);
     try {
-      const next = await requestStatus({});
+      const next = await requestStatus({ deviceLocale });
       generation.current += 1;
       setProbes({});
       setStatus(next);
@@ -521,7 +533,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
     } finally {
       setLoading(false);
     }
-  }, [requestStatus]);
+  }, [requestStatus, deviceLocale]);
 
   useEffect(() => {
     void load();
@@ -562,12 +574,19 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
       });
   }, [probes, requestProbe, selectedId]);
 
+  const localePref: LocalePref = status?.locale ?? "auto";
+  const locale = resolveLocale(localePref, deviceLocale);
+  const tr = useCallback<Tr>((key, vars) => translate(locale, key, vars), [locale]);
+
   const run = useCallback(
-    async (action: () => Promise<unknown>, done: string) => {
+    async <Result,>(action: () => Promise<Result>, done: (result: Result) => string) => {
       setBusy(true);
       try {
-        await action();
-        toast.show(done, { variant: "success" });
+        const result = await action();
+        const message = done(result);
+        if (message) {
+          toast.show(message, { variant: "success" });
+        }
         await load();
       } catch (cause) {
         toast.error(errorText(cause));
@@ -586,6 +605,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
     () => new Set(project ? (kind === "mcp" ? project.mountedMcp : project.mountedSkills) : []),
     [project, kind],
   );
+  const skillBlind = status ? status.harnesses.filter((harness) => !harness.projectSkills) : [];
   const needle = query.trim().toLowerCase();
   const items = needle
     ? allItems.filter((item) => item.name.toLowerCase().includes(needle) || item.summary.toLowerCase().includes(needle))
@@ -614,23 +634,48 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
               <Text style={{ color: theme.colors.foreground, fontSize: 18, fontWeight: "700" }}>{APP_NAME}</Text>
               <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }} numberOfLines={1}>
                 {status
-                  ? `${status.mcp.length} 个 MCP · ${status.skills.length} 个 Skill · ${status.projects.length} 个项目`
-                  : "MCP 与 Skill 统一管理"}
+                  ? tr("counts", { mcp: status.mcp.length, skills: status.skills.length, projects: status.projects.length })
+                  : tr("tagline")}
               </Text>
             </View>
           </View>
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            {status && !status.importedAt ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Segmented
+              value={localePref}
+              theme={theme}
+              onChange={(next) => void run(() => requestLocale({ locale: next }), () => "")}
+              options={LOCALE_PREFS.map((value) => ({
+                value,
+                label: value === "auto" ? tr("langAuto") : value === "en" ? "English" : "中文",
+              }))}
+            />
+            {status ? (
               <Button
-                label="从 Cursor 导入"
+                label={tr(status.importedAt ? "rescanButton" : "importButton")}
                 icon="Download"
-                primary
+                primary={!status.importedAt}
                 theme={theme}
                 disabled={loading || busy}
-                onPress={() => void run(() => requestImport({}), "导入完成")}
+                onPress={() =>
+                  void run(
+                    () => requestImport({}),
+                    (result) => {
+                      if (result.conflicts.length > 0) {
+                        toast.show(tr("importConflicts", { count: result.conflicts.length, names: result.conflicts.join(tr("listSep")) }), {
+                          variant: "warning",
+                          durationMs: 12_000,
+                        });
+                      }
+                      if (result.failed.length > 0) {
+                        toast.error(tr("importFailed", { paths: result.failed.map((failure) => failure.path).join(tr("listSep")) }));
+                      }
+                      return tr("importDone", { servers: result.servers, skills: result.skills });
+                    },
+                  )
+                }
               />
             ) : null}
-            <Button label={loading ? "刷新中…" : "刷新"} icon="RefreshCw" theme={theme} disabled={loading} onPress={() => void load()} />
+            <Button label={tr(loading ? "refreshing" : "refresh")} icon="RefreshCw" theme={theme} disabled={loading} onPress={() => void load()} />
           </View>
         </View>
 
@@ -640,21 +685,26 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
           </View>
         ) : null}
 
-        {!status && !error ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>加载中…</Text> : null}
+        {!status && !error ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>{tr("loading")}</Text> : null}
 
         {status && !status.importedAt && status.mcp.length === 0 && status.skills.length === 0 ? (
-          <EmptyState icon="Download" title="还没有接管任何配置" hint="从 Cursor 用户目录导入现有的 MCP 和 Skill，之后在这里统一挂载到各项目。" theme={theme} />
+          <EmptyState
+            icon="Download"
+            title={tr("emptyCatalogTitle")}
+            hint={tr("emptyCatalogHint", { harnesses: status.importSources.join(tr("listSep")) })}
+            theme={theme}
+          />
         ) : null}
 
         {status && status.projects.length === 0 ? (
-          <EmptyState icon="FolderGit2" title="没有项目" hint="在 Paseo 里打开一个项目后，这里就能为它挂载 MCP 和 Skill。" theme={theme} />
+          <EmptyState icon="FolderGit2" title={tr("noProjectsTitle")} hint={tr("noProjectsHint")} theme={theme} />
         ) : null}
 
         {status && project ? (
           <>
             <View style={{ gap: 8 }}>
-              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, fontWeight: "600", letterSpacing: 0.5 }}>项目</Text>
-              <ProjectChips projects={status.projects} selectedId={selectedId} theme={theme} onSelect={(id) => {
+              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, fontWeight: "600", letterSpacing: 0.5 }}>{tr("projects")}</Text>
+              <ProjectChips projects={status.projects} selectedId={selectedId} theme={theme} tr={tr} onSelect={(id) => {
                 setSelectedId(id);
                 setExpanded(null);
               }} />
@@ -673,7 +723,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
                 }}
                 options={(["mcp", "skill"] as const).map((value) => ({
                   value,
-                  label: KIND_LABEL[value],
+                  label: tr(KIND_KEY[value]),
                   count: `${(value === "mcp" ? project.mountedMcp : project.mountedSkills).length}/${(value === "mcp" ? status.mcp : status.skills).length}`,
                 }))}
               />
@@ -694,7 +744,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
                 <TextInput
                   value={query}
                   onChangeText={setQuery}
-                  placeholder={`搜索 ${KIND_LABEL[kind]}`}
+                  placeholder={tr("search", { kind: tr(KIND_KEY[kind]) })}
                   placeholderTextColor={theme.colors.foregroundMuted}
                   style={{ flex: 1, color: theme.colors.foreground, fontSize: 12, paddingVertical: 7 }}
                 />
@@ -704,13 +754,11 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
             <View style={{ gap: 8 }}>
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                 <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-                  {kind === "mcp"
-                    ? `「全局」写入用户级配置，所有会话都会加载，此时项目开关锁定为开启；关闭全局后「项目」开关决定是否写入「${project.name}」的项目配置。Cursor 显示「待信任」时点「信任」放行。徽章为各 harness 实测加载结果，点行查看原始输出。`
-                    : `「全局」链接到用户级 Skill 目录，所有会话可用，此时项目开关锁定为开启；关闭全局会把源目录迁到 ~/.paseo/agent-kit/skills，之后「项目」开关决定是否链接到「${project.name}」。`}
+                  {tr(kind === "mcp" ? "helpMcp" : "helpSkill", { project: project.name })}
                 </Text>
-                <Legend theme={theme} />
+                <Legend theme={theme} tr={tr} />
               </View>
-              {kind === "skill" ? (
+              {kind === "skill" && skillBlind.length > 0 ? (
                 <View
                   style={{
                     flexDirection: "row",
@@ -725,18 +773,18 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
                 >
                   <Icon name="TriangleAlert" size={14} color={theme.colors.statusWarning} />
                   <Text style={{ flex: 1, color: theme.colors.statusWarning, fontSize: 12 }}>
-                    Cursor 在 Paseo 会话中不加载项目级 Skill（已实测）。关闭「全局」、只挂到项目的 Skill，在 Cursor 会话里不可用；Kiro、Qoder 正常。
+                    {tr("skillBlind", { harnesses: skillBlind.map((harness) => harness.label).join(tr("listSep")) })}
                   </Text>
                 </View>
               ) : null}
               {probe?.status === "error" ? (
-                <Text style={{ color: theme.colors.statusDanger, fontSize: 11 }}>检测失败：{probe.message}</Text>
+                <Text style={{ color: theme.colors.statusDanger, fontSize: 11 }}>{tr("probeFailed", { message: probe.message })}</Text>
               ) : null}
               {items.length === 0 ? (
                 <EmptyState
                   icon={kind === "mcp" ? "Server" : "Sparkles"}
-                  title={needle ? "没有匹配项" : `还没有 ${KIND_LABEL[kind]}`}
-                  hint={needle ? `没有名称或路径包含「${query.trim()}」的 ${KIND_LABEL[kind]}。` : "导入后会出现在这里。"}
+                  title={needle ? tr("noMatch") : tr("noneYet", { kind: tr(KIND_KEY[kind]) })}
+                  hint={needle ? tr("noMatchHint", { kind: tr(KIND_KEY[kind]), query: query.trim() }) : tr("noneHint")}
                   theme={theme}
                 />
               ) : (
@@ -766,23 +814,24 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
                         compact={layout.compact}
                         last={index === items.length - 1}
                         theme={theme}
+                        tr={tr}
                         onToggleExpand={() => setExpanded((current) => (current === rowKey ? null : rowKey))}
                         onMount={(mount) =>
                           void run(
                             () => requestMount({ kind, name: item.name, projectId: project.projectId, mount }),
-                            mount ? `已挂载 ${item.name} 到 ${project.name}` : `已从 ${project.name} 卸载 ${item.name}`,
+                            () => tr(mount ? "mounted" : "unmounted", { name: item.name, project: project.name }),
                           )
                         }
                         onUserLevel={(userLevel) =>
                           void run(
                             () => requestUserLevel({ kind, name: item.name, userLevel }),
-                            userLevel ? `${item.name} 已设为全局加载` : `${item.name} 已取消全局，仅在挂载的项目中加载`,
+                            () => tr(userLevel ? "globalOn" : "globalOff", { name: item.name }),
                           )
                         }
-                        onTrust={() =>
+                        onTrust={(harness) =>
                           void run(
-                            () => requestTrust({ name: item.name, projectId: project.projectId }),
-                            `已在 Cursor 信任 ${item.name}（${project.name}）`,
+                            () => requestTrust({ harness: harness.id, name: item.name, projectId: project.projectId }),
+                            () => tr("trusted", { name: item.name, harness: harness.label, project: project.name }),
                           )
                         }
                       />

@@ -17,41 +17,6 @@ export const McpServerSchema = z.object({
 
 export type McpServer = z.infer<typeof McpServerSchema>;
 
-export const NamedServerSchema = z.object({
-  name: z.string(),
-  server: McpServerSchema,
-});
-
-export const TargetStatusSchema = z.object({
-  harness: z.string(),
-  label: z.string(),
-  path: z.string(),
-  exists: z.boolean(),
-  isSource: z.boolean(),
-  servers: z.array(NamedServerSchema),
-  missing: z.array(z.string()),
-  extra: z.array(z.string()),
-  drifted: z.array(z.string()),
-  status: z.enum(["source", "in-sync", "out-of-sync", "unavailable"]),
-});
-
-export const ScopeSnapshotSchema = z.object({
-  scope: z.enum(["user", "project"]),
-  projectId: z.string().nullable(),
-  projectName: z.string().nullable(),
-  dir: z.string().nullable(),
-  sourcePath: z.string(),
-  sourceExists: z.boolean(),
-  sourceServers: z.array(NamedServerSchema),
-  targets: z.array(TargetStatusSchema),
-});
-
-export const SnapshotSchema = z.object({
-  fetchedAt: z.number(),
-  user: ScopeSnapshotSchema,
-  projects: z.array(ScopeSnapshotSchema),
-});
-
 export const ChangeSchema = z.object({
   harness: z.string(),
   scope: z.enum(["user", "project"]),
@@ -67,17 +32,8 @@ export const SyncResultSchema = z.object({
   failed: z.array(z.object({ path: z.string(), error: z.string() })),
 });
 
-export type TargetStatus = z.infer<typeof TargetStatusSchema>;
-export type ScopeSnapshot = z.infer<typeof ScopeSnapshotSchema>;
-export type Snapshot = z.infer<typeof SnapshotSchema>;
 export type Change = z.infer<typeof ChangeSchema>;
 export type SyncResult = z.infer<typeof SyncResultSchema>;
-
-export const statusRpc = defineRpc({
-  name: "agent-kit.status",
-  input: z.object({}),
-  output: SnapshotSchema,
-});
 
 export const syncRpc = defineRpc({
   name: "agent-kit.sync",
@@ -102,6 +58,10 @@ export const CatalogItemSchema = z.object({
 export const HarnessColumnSchema = z.object({
   id: z.string(),
   label: z.string(),
+  /** Paseo sessions of this harness read project-level skill directories */
+  projectSkills: z.boolean(),
+  /** project MCP servers need an approval step in this harness */
+  canApprove: z.boolean(),
 });
 
 export const ProjectBoardSchema = z.object({
@@ -115,6 +75,9 @@ export const ProjectBoardSchema = z.object({
 export const KitStatusSchema = z.object({
   fetchedAt: z.number(),
   importedAt: z.number().nullable(),
+  locale: z.enum(["auto", "en", "zh"]),
+  /** labels of every harness the import reads from */
+  importSources: z.array(z.string()),
   harnesses: z.array(HarnessColumnSchema),
   mcp: z.array(CatalogItemSchema),
   skills: z.array(CatalogItemSchema),
@@ -141,7 +104,7 @@ export type ProbeCell = z.infer<typeof ProbeCellSchema>;
 
 export const kitStatusRpc = defineRpc({
   name: "agent-kit.kit-status",
-  input: z.object({}),
+  input: z.object({ deviceLocale: z.enum(["en", "zh"]) }),
   output: KitStatusSchema,
 });
 
@@ -151,6 +114,8 @@ export const importRpc = defineRpc({
   output: z.object({
     servers: z.number(),
     skills: z.number(),
+    conflicts: z.array(z.string()),
+    failed: z.array(z.object({ path: z.string(), error: z.string() })),
     importedAt: z.number(),
   }),
 });
@@ -218,6 +183,7 @@ export const mountRpc = defineRpc({
 export const trustRpc = defineRpc({
   name: "agent-kit.trust",
   input: z.object({
+    harness: z.string(),
     name: z.string(),
     projectId: z.string(),
   }),
@@ -231,5 +197,11 @@ export const userLevelRpc = defineRpc({
     name: z.string(),
     userLevel: z.boolean(),
   }),
+  output: z.object({ ok: z.literal(true) }),
+});
+
+export const localeRpc = defineRpc({
+  name: "agent-kit.locale",
+  input: z.object({ locale: z.enum(["auto", "en", "zh"]) }),
   output: z.object({ ok: z.literal(true) }),
 });

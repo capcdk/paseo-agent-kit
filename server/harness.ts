@@ -1,6 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { McpServer } from "../shared/api";
+import type { McpServer, ProbeCell } from "../shared/api";
+import { t } from "./locale";
+import { cellsFromBullets, cellsFromHeaders, cellsFromLines, runCli, staticCells, type ProbeNames } from "./probe";
 
 export type ServerMap = Record<string, McpServer>;
 
@@ -48,6 +50,8 @@ function normalizeServer(value: unknown): McpServer | null {
   }
   if (typeof value.enabled === "boolean") {
     server.enabled = value.enabled;
+  } else if (value.disabled === true) {
+    server.enabled = false;
   }
   return server;
 }
@@ -163,16 +167,51 @@ export const opencodeFormat: ConfigFormat = {
   },
 };
 
-export interface HarnessDef {
-  readonly id: string;
-  readonly label: string;
+export interface McpSupport {
   readonly format: ConfigFormat;
   readonly userPath: string;
   readonly projectPath: ((dir: string) => string) | null;
-  readonly isSource: boolean;
+  /** false when this harness's Paseo sessions ignore project MCP files; mounted servers are then injected at agent.create */
+  readonly projectLoaded: boolean;
+  /** runs after a project entry is written or changed, for harnesses that gate project servers behind approval */
+  readonly approveProject: ((rootPath: string, name: string) => Promise<void>) | null;
 }
 
-export const SOURCE_ID = "cursor";
+export interface SkillSupport {
+  /** where agent-kit links global skills */
+  readonly userLink: string;
+  /** every user-level root the harness reads on its own; imported from, and vacated when a skill stops being global */
+  readonly userScan: readonly string[];
+  readonly projectLink: ((dir: string) => string) | null;
+  readonly projectScan: (dir: string) => readonly string[];
+  /** false when this harness's Paseo sessions ignore project skill directories */
+  readonly projectLoaded: boolean;
+}
+
+/**
+ * One entry per supported harness. A new harness declares all of: MCP user/project
+ * files, skill user/project roots, the provider ids Paseo launches it under, and
+ * optionally a live load check. Import, sync, mounting, and injection all read this.
+ */
+export interface HarnessDef {
+  readonly id: string;
+  readonly label: string;
+  /** matches the Paseo provider ids of this harness */
+  readonly providerPattern: RegExp | null;
+  readonly mcp: McpSupport;
+  readonly skills: SkillSupport | null;
+  /** load check run in a project directory; only harnesses with one get a dashboard column */
+  readonly probe: ((rootPath: string, names: ProbeNames) => Promise<ProbeCell[]>) | null;
+}
+
+async function cursorApprove(rootPath: string, name: string): Promise<void> {
+  const run = await runCli("agent", ["mcp", "enable", name], rootPath);
+  if (run.code !== 0) {
+    throw new Error(
+      t("approveFailed", { harness: "Cursor", name, detail: run.out.trim().slice(-180) || t("exitCode", { code: String(run.code) }) }),
+    );
+  }
+}
 
 export function harnesses(): readonly HarnessDef[] {
   const home = homedir();
@@ -180,46 +219,131 @@ export function harnesses(): readonly HarnessDef[] {
     {
       id: "cursor",
       label: "Cursor",
-      format: plainFormat,
-      userPath: join(home, ".cursor", "mcp.json"),
-      projectPath: (dir) => join(dir, ".cursor", "mcp.json"),
-      isSource: true,
+      providerPattern: /^cursor/,
+      mcp: {
+        format: plainFormat,
+        userPath: join(home, ".cursor", "mcp.json"),
+        // the CLI and IDE read it (after approval); ACP sessions in Paseo do not
+        projectPath: (dir) => join(dir, ".cursor", "mcp.json"),
+        projectLoaded: false,
+        approveProject: cursorApprove,
+      },
+      skills: {
+        userLink: join(home, ".cursor", "skills"),
+        userScan: [join(home, ".cursor", "skills"), join(home, ".agents", "skills"), join(home, ".claude", "skills")],
+        projectLink: (dir) => join(dir, ".cursor", "skills"),
+        projectScan: (dir) => [join(dir, ".cursor", "skills")],
+        projectLoaded: false,
+      },
+      async probe(rootPath, names) {
+        const run = await runCli("agent", ["mcp", "list"], rootPath);
+        return [
+          ...cellsFromLines("mcp", "cursor", "Cursor", names.mcp, run),
+          ...staticCells("skill", "cursor", names.skills, t("skillNotReported", { harness: "Cursor" }), "unknown"),
+        ];
+      },
     },
     {
       id: "kiro",
       label: "Kiro",
-      format: plainFormat,
-      userPath: join(home, ".kiro", "settings", "mcp.json"),
-      projectPath: (dir) => join(dir, ".kiro", "settings", "mcp.json"),
-      isSource: false,
+      providerPattern: /^kiro/,
+      mcp: {
+        format: plainFormat,
+        userPath: join(home, ".kiro", "settings", "mcp.json"),
+        projectPath: (dir) => join(dir, ".kiro", "settings", "mcp.json"),
+        projectLoaded: true,
+        approveProject: null,
+      },
+      skills: {
+        userLink: join(home, ".kiro", "skills"),
+        userScan: [join(home, ".kiro", "skills")],
+        projectLink: (dir) => join(dir, ".kiro", "skills"),
+        projectScan: (dir) => [join(dir, ".kiro", "skills")],
+        projectLoaded: true,
+      },
+      async probe(rootPath, names) {
+        const run = await runCli("kiro-cli", ["mcp", "list", "default"], rootPath);
+        return [
+          ...cellsFromBullets("mcp", "kiro", names.mcp, run),
+          ...staticCells("skill", "kiro", names.skills, t("skillNotReported", { harness: "Kiro" }), "unknown"),
+        ];
+      },
     },
     {
       id: "qoder",
       label: "Qoder",
-      format: plainFormat,
-      userPath: join(home, ".qoder", "settings.json"),
-      projectPath: (dir) => join(dir, ".mcp.json"),
-      isSource: false,
+      providerPattern: /^qoder/,
+      mcp: {
+        format: plainFormat,
+        userPath: join(home, ".qoder", "settings.json"),
+        projectPath: (dir) => join(dir, ".mcp.json"),
+        projectLoaded: true,
+        approveProject: null,
+      },
+      skills: {
+        userLink: join(home, ".agents", "skills"),
+        userScan: [join(home, ".agents", "skills"), join(home, ".qoder", "skills")],
+        projectLink: (dir) => join(dir, ".qoder", "skills"),
+        projectScan: (dir) => [join(dir, ".qoder", "skills"), join(dir, ".agents", "skills")],
+        projectLoaded: true,
+      },
+      async probe(rootPath, names) {
+        const [mcp, skills] = await Promise.all([
+          runCli("qodercli", ["mcp", "list"], rootPath),
+          runCli("qodercli", ["skills", "list"], rootPath),
+        ]);
+        return [
+          ...cellsFromLines("mcp", "qoder", "Qoder", names.mcp, mcp),
+          ...cellsFromHeaders("skill", "qoder", "Qoder", names.skills, skills),
+        ];
+      },
     },
     {
       id: "opencode",
       label: "OpenCode",
-      format: opencodeFormat,
-      userPath: join(home, ".config", "opencode", "opencode.json"),
-      projectPath: null,
-      isSource: false,
+      providerPattern: null,
+      mcp: {
+        format: opencodeFormat,
+        userPath: join(home, ".config", "opencode", "opencode.json"),
+        projectPath: null,
+        projectLoaded: true,
+        approveProject: null,
+      },
+      skills: null,
+      probe: null,
     },
     {
       id: "omp",
       label: "Oh My Pi",
-      format: plainFormat,
-      userPath: join(home, ".omp", "agent", "mcp.json"),
-      projectPath: null,
-      isSource: false,
+      providerPattern: null,
+      mcp: {
+        format: plainFormat,
+        userPath: join(home, ".omp", "agent", "mcp.json"),
+        projectPath: null,
+        projectLoaded: true,
+        approveProject: null,
+      },
+      skills: null,
+      probe: null,
     },
   ];
 }
 
-export function findHarness(id: string): HarnessDef | undefined {
-  return harnesses().find((harness) => harness.id === id);
+export function findHarness(id: string): HarnessDef {
+  const harness = harnesses().find((entry) => entry.id === id);
+  if (!harness) {
+    throw new Error(t("unknownHarness", { id }));
+  }
+  return harness;
 }
+
+/** Every user-level skill root some harness reads on its own. */
+export function autoScannedUserSkillRoots(): string[] {
+  return [...new Set(harnesses().flatMap((harness) => harness.skills?.userScan ?? []))];
+}
+
+/** Every project-level skill root some harness reads on its own. */
+export function projectSkillRoots(dir: string): string[] {
+  return [...new Set(harnesses().flatMap((harness) => harness.skills?.projectScan(dir) ?? []))];
+}
+

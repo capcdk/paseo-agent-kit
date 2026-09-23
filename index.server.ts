@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   kitStatusRpc,
   importRpc,
+  localeRpc,
   mountRpc,
   probeRpc,
   serverDeleteRpc,
@@ -9,25 +10,24 @@ import {
   skillDeleteRpc,
   skillSyncRpc,
   skillUpsertRpc,
-  statusRpc,
   syncRpc,
   trustRpc,
   userLevelRpc,
 } from "./shared/api";
-import { buildKitStatus } from "./server/status";
-import { buildSnapshot } from "./server/snapshot";
+import { buildKitStatus, probeProject } from "./server/status";
 import { applySync, planSync } from "./server/sync";
 import { loadKitStore, saveKitStore } from "./server/kit-store";
-import { importFromCursor } from "./server/import";
+import { importFromHarnesses } from "./server/import";
+import { harnesses } from "./server/harness";
+import { setDeviceLocale, t } from "./server/locale";
 import {
-  approveCursorProjectMcp,
+  approveProjectMcp,
   projectRoot,
   reapproveMountedMcp,
   setProjectMount,
   setSkillUserLevel,
   setUserLevel,
 } from "./server/mount";
-import { probeProject } from "./server/probe";
 import { readProjects, syncSkills } from "./server/skills";
 
 function projectForCwd(cwd: string): string | null {
@@ -44,11 +44,14 @@ function projectForCwd(cwd: string): string | null {
 export default function contribute(server: PluginServerContext) {
   // Session-level injection (Paseo-only), additive to the harness's own config:
   // - servers marked sessionInject go into every agent.create;
-  // - cursor ACP ignores project-level .cursor/mcp.json, so cursor sessions also
-  //   get the non-global servers mounted on the project that owns their cwd.
+  // - sessions of harnesses that ignore project MCP files also get the
+  //   non-global servers mounted on the project that owns their cwd.
   server.before("agent.create", ({ request }) => {
     const { servers } = loadKitStore();
-    const projectId = /^cursor/.test(request.config.provider) ? projectForCwd(request.config.cwd) : null;
+    const ignoresProjectMcp = harnesses().some(
+      (harness) => !harness.mcp.projectLoaded && harness.providerPattern?.test(request.config.provider),
+    );
+    const projectId = ignoresProjectMcp ? projectForCwd(request.config.cwd) : null;
     const injectable = servers.filter(
       (def) =>
         def.enabled &&
@@ -73,12 +76,20 @@ export default function contribute(server: PluginServerContext) {
     };
   });
 
-  server.handle(kitStatusRpc, async () => buildKitStatus());
+  server.handle(kitStatusRpc, async ({ deviceLocale }) => {
+    setDeviceLocale(deviceLocale);
+    return buildKitStatus();
+  });
+
+  server.handle(localeRpc, async ({ locale }) => {
+    saveKitStore({ ...loadKitStore(), locale });
+    return { ok: true as const };
+  });
 
   server.handle(probeRpc, async ({ projectId }) => {
     const project = readProjects().find((entry) => entry.projectId === projectId);
     if (!project) {
-      throw new Error(`未知项目：${projectId}`);
+      throw new Error(t("unknownProject", { id: projectId }));
     }
     const store = loadKitStore();
     const cells = await probeProject(project.rootPath, {
@@ -102,12 +113,12 @@ export default function contribute(server: PluginServerContext) {
     return { ok: true as const };
   });
 
-  server.handle(trustRpc, async ({ name, projectId }) => {
-    await approveCursorProjectMcp(projectRoot(projectId), name);
+  server.handle(trustRpc, async ({ harness, name, projectId }) => {
+    await approveProjectMcp(harness, projectRoot(projectId), name);
     return { ok: true as const };
   });
 
-  server.handle(importRpc, async () => importFromCursor());
+  server.handle(importRpc, async () => importFromHarnesses());
 
   server.handle(serverUpsertRpc, async ({ previousName, server: def }) => {
     const store = loadKitStore();
@@ -144,8 +155,6 @@ export default function contribute(server: PluginServerContext) {
   });
 
   server.handle(skillSyncRpc, async () => syncSkills());
-
-  server.handle(statusRpc, async () => buildSnapshot());
 
   server.handle(syncRpc, async (input) => {
     const projectId = input.projectId ?? null;

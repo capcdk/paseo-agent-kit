@@ -4,9 +4,9 @@ import { defineSettings } from "@getpaseo/plugin";
 /**
  * Single source of truth for Agent Kit.
  *
- * agent-kit OWNS these entities; harness files (cursor/kiro/qoder/opencode/omp)
- * are only sync targets. The `import` RPC seeds the store once from the
- * existing cursor directories; after that, cursor files are downstream.
+ * agent-kit OWNS these entities; harness files are only sync targets. The
+ * `import` RPC seeds the store from every registered harness's user- and
+ * project-level config; after that, all harness files are downstream.
  */
 
 export const McpServerDefSchema = z.object({
@@ -42,6 +42,7 @@ export const SkillDefSchema = z.object({
 export const KitStoreSchema = z.object({
   version: z.number().default(1),
   importedAt: z.number().nullable().default(null),
+  locale: z.enum(["auto", "en", "zh"]).default("auto"),
   servers: z.array(McpServerDefSchema).default([]),
   skills: z.array(SkillDefSchema).default([]),
 });

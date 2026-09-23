@@ -48,7 +48,7 @@ function readTargetServers(harness: HarnessDef, path: string): ServerMap {
   if (!existsSync(path)) {
     return {};
   }
-  return harness.format.read(readJsonDoc(path).doc);
+  return harness.mcp.format.read(readJsonDoc(path).doc);
 }
 
 function defToServer(def: McpServerDef) {
@@ -94,9 +94,9 @@ function planUser(defs: readonly McpServerDef[]): TargetPlan[] {
       harness,
       "user",
       null,
-      harness.userPath,
+      harness.mcp.userPath,
       source,
-      readTargetServers(harness, harness.userPath),
+      readTargetServers(harness, harness.mcp.userPath),
       ownedFor(ownership, harness.id, "user", null),
     ),
   );
@@ -110,7 +110,7 @@ function planProjects(defs: readonly McpServerDef[], projectId: string | null): 
   for (const project of selected) {
     const source = desiredServers(defs, "project", project.projectId);
     for (const harness of harnesses()) {
-      const path = harness.projectPath?.(project.rootPath);
+      const path = harness.mcp.projectPath?.(project.rootPath);
       if (!path) {
         continue;
       }
@@ -157,7 +157,7 @@ export function applySync(scope: SyncScope, projectId: string | null): SyncResul
       if (plan.changes.length > 0) {
         const existingDoc = readJsonDoc(plan.path).doc;
         const owned = ownedFor(ownership, plan.harness.id, plan.scope, plan.projectId);
-        const next = plan.harness.format.write(existingDoc, plan.source, owned);
+        const next = plan.harness.mcp.format.write(existingDoc, plan.source, owned);
         writeJsonDoc(plan.path, next);
       }
       recordOwned(ownership, plan.harness.id, plan.scope, plan.projectId, Object.keys(plan.source));

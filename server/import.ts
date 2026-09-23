@@ -1,105 +1,164 @@
-
+import { existsSync, realpathSync } from "node:fs";
+import type { McpServer } from "../shared/api";
 import type { KitStore, McpServerDef, SkillDef } from "../shared/store";
-import { harnesses, SOURCE_ID } from "./harness";
+import { harnesses, type HarnessDef } from "./harness";
 import { loadKitStore, saveKitStore } from "./kit-store";
-import { readJsonDoc } from "./mcp-config";
-import { realpathSync } from "node:fs";
-import { listSkillsInRoot, readProjects, skillHarnesses } from "./skills";
+import { readJsonDoc, serversEqual } from "./mcp-config";
+import { listSkillsInRoot, readProjects } from "./skills";
+import { applySync } from "./sync";
 
-/** Convert a raw cursor-file server entry into a store def (deduce transport). */
-function toServerDef(name: string, server: Record<string, unknown>, userLevel: boolean): McpServerDef {
-  const command = typeof server.command === "string" ? server.command : undefined;
-  const url = typeof server.url === "string" ? server.url : undefined;
+export interface ImportResult {
+  readonly servers: number;
+  readonly skills: number;
+  readonly conflicts: string[];
+  readonly failed: { path: string; error: string }[];
+  readonly importedAt: number;
+}
+
+function toServerDef(name: string, server: McpServer, userLevel: boolean): McpServerDef {
   return {
     name,
-    ...(command ? { command } : {}),
-    ...(Array.isArray(server.args) ? { args: server.args.filter((a): a is string => typeof a === "string") } : {}),
-    ...(server.env && typeof server.env === "object" ? { env: Object.fromEntries(Object.entries(server.env).filter(([, v]) => typeof v === "string")) as Record<string, string> } : {}),
-    ...(url ? { url } : {}),
-    ...(server.headers && typeof server.headers === "object" ? { headers: Object.fromEntries(Object.entries(server.headers).filter(([, v]) => typeof v === "string")) as Record<string, string> } : {}),
-    transport: url ? "http" : "stdio",
-    enabled: true,
+    ...(server.command ? { command: server.command } : {}),
+    ...(server.args ? { args: server.args } : {}),
+    ...(server.env ? { env: server.env } : {}),
+    ...(server.url ? { url: server.url } : {}),
+    ...(server.headers ? { headers: server.headers } : {}),
+    transport: server.url ? (server.type === "sse" ? "sse" : "http") : "stdio",
+    enabled: server.enabled !== false,
     userLevel,
     projectIds: [],
     sessionInject: false,
   };
 }
 
-/** One-time import: harvest cursor user + project MCP configs and skill dirs into the store. Idempotent — merges, never deletes. */
-export function importFromCursor(): { servers: number; skills: number; importedAt: number } {
+function defToServer(def: McpServerDef): McpServer {
+  return {
+    ...(def.command ? { command: def.command } : {}),
+    ...(def.args ? { args: def.args } : {}),
+    ...(def.env ? { env: def.env } : {}),
+    ...(def.url ? { url: def.url } : {}),
+    ...(def.headers ? { headers: def.headers } : {}),
+    enabled: def.enabled,
+  };
+}
+
+function readServers(harness: HarnessDef, path: string): Record<string, McpServer> {
+  return existsSync(path) ? harness.mcp.format.read(readJsonDoc(path).doc) : {};
+}
+
+function realPath(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Take over what every registered harness already has: user- and project-level MCP
+ * servers and skills. Idempotent — merges by name and never deletes. When two harnesses
+ * disagree on a name, the first one in registry order wins and the clash is reported;
+ * the follow-up sync then writes the winner everywhere (each file is backed up first).
+ */
+export function importFromHarnesses(): ImportResult {
   const store = loadKitStore();
   const importedAt = Date.now();
-  const byName = new Map(store.servers.map((def) => [def.name, def]));
-  let serverCount = 0;
+  const projects = readProjects();
+  const all = harnesses();
+  const conflicts = new Set<string>();
 
-  for (const harness of harnesses()) {
-    if (harness.id !== SOURCE_ID) {
-      continue;
+  const servers = new Map(store.servers.map((def) => [def.name, def]));
+  const serverOrigin = new Map<string, string>();
+  let serverCount = 0;
+  const takeServer = (harness: HarnessDef, name: string, server: McpServer, projectId: string | null) => {
+    const existing = servers.get(name);
+    if (!existing) {
+      const def = toServerDef(name, server, projectId === null);
+      if (projectId !== null) {
+        def.projectIds.push(projectId);
+      }
+      servers.set(name, def);
+      serverOrigin.set(name, harness.label);
+      serverCount += 1;
+      return;
     }
-    // user level
-    const { doc } = readJsonDoc(harness.userPath);
-    if (doc && typeof doc === "object" && !Array.isArray(doc)) {
-      const mcpServers = (doc as Record<string, unknown>).mcpServers;
-      if (mcpServers && typeof mcpServers === "object") {
-        for (const [name, value] of Object.entries(mcpServers as Record<string, unknown>)) {
-          if (value && typeof value === "object" && !byName.has(name)) {
-            byName.set(name, toServerDef(name, value as Record<string, unknown>, true));
-            serverCount += 1;
-          }
-        }
-      }
+    if (!serversEqual(defToServer(existing), server)) {
+      conflicts.add(`MCP ${name} (${serverOrigin.get(name) ?? "Agent Kit"} ≠ ${harness.label})`);
     }
-    // project level: bind existing project .cursor/mcp.json entries to those projects
-    for (const project of readProjects()) {
-      const projectPath = harness.projectPath?.(project.rootPath);
-      if (!projectPath) {
+    if (projectId !== null && !existing.userLevel && !existing.projectIds.includes(projectId)) {
+      existing.projectIds.push(projectId);
+    }
+  };
+
+  for (const harness of all) {
+    for (const [name, server] of Object.entries(readServers(harness, harness.mcp.userPath))) {
+      takeServer(harness, name, server, null);
+    }
+  }
+  for (const project of projects) {
+    for (const harness of all) {
+      const path = harness.mcp.projectPath?.(project.rootPath);
+      if (!path) {
         continue;
       }
-      const { doc: projectDoc } = readJsonDoc(projectPath);
-      if (!projectDoc || typeof projectDoc !== "object" || Array.isArray(projectDoc)) {
-        continue;
-      }
-      const projectServers = (projectDoc as Record<string, unknown>).mcpServers;
-      if (!projectServers || typeof projectServers !== "object") {
-        continue;
-      }
-      for (const [name, value] of Object.entries(projectServers as Record<string, unknown>)) {
-        if (!value || typeof value !== "object") {
-          continue;
-        }
-        const existing = byName.get(name);
-        if (existing) {
-          if (!existing.projectIds.includes(project.projectId)) {
-            existing.projectIds.push(project.projectId);
-          }
-        } else {
-          const def = toServerDef(name, value as Record<string, unknown>, false);
-          def.projectIds.push(project.projectId);
-          byName.set(name, def);
-          serverCount += 1;
-        }
+      for (const [name, server] of Object.entries(readServers(harness, path))) {
+        takeServer(harness, name, server, project.projectId);
       }
     }
   }
 
   const skills: SkillDef[] = [...store.skills];
-  const skillByPath = new Set(skills.map((def) => def.sourcePath));
+  const skillByName = new Map(skills.map((def) => [def.name, def]));
+  const knownSources = new Set(skills.flatMap((def) => [def.sourcePath, realPath(def.sourcePath) ?? def.sourcePath]));
   let skillCount = 0;
-  for (const harness of skillHarnesses()) {
-    if (!harness.skillUserPath) {
-      continue;
+  const takeSkill = (name: string, sourcePath: string, projectId: string | null) => {
+    const real = realPath(sourcePath);
+    if (!real) {
+      return;
     }
-    for (const found of listSkillsInRoot(harness.skillUserPath)) {
-      const real = realpathSync(found.sourcePath);
-      if (!skillByPath.has(found.sourcePath) && !skillByPath.has(real)) {
-        skills.push({ name: found.name, sourcePath: real, enabled: true, userLevel: true, projectIds: [] });
-        skillByPath.add(real);
-        skillCount += 1;
+    const existing = skillByName.get(name);
+    if (existing) {
+      if (realPath(existing.sourcePath) !== real) {
+        conflicts.add(`Skill ${name} (${existing.sourcePath} ≠ ${real})`);
+      } else if (projectId !== null && !existing.userLevel && !existing.projectIds.includes(projectId)) {
+        existing.projectIds.push(projectId);
+      }
+      return;
+    }
+    if (knownSources.has(real)) {
+      return;
+    }
+    const def: SkillDef = { name, sourcePath: real, enabled: true, userLevel: projectId === null, projectIds: projectId ? [projectId] : [] };
+    skills.push(def);
+    skillByName.set(name, def);
+    knownSources.add(real);
+    skillCount += 1;
+  };
+
+  for (const harness of all) {
+    for (const root of harness.skills?.userScan ?? []) {
+      for (const found of listSkillsInRoot(root)) {
+        takeSkill(found.name, found.sourcePath, null);
+      }
+    }
+  }
+  for (const project of projects) {
+    for (const harness of all) {
+      for (const root of harness.skills?.projectScan(project.rootPath) ?? []) {
+        for (const found of listSkillsInRoot(root)) {
+          takeSkill(found.name, found.sourcePath, project.projectId);
+        }
       }
     }
   }
 
-  const next: KitStore = { ...store, importedAt, servers: [...byName.values()], skills };
+  const next: KitStore = {
+    ...store,
+    importedAt,
+    servers: [...servers.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    skills: skills.sort((a, b) => a.name.localeCompare(b.name)),
+  };
   saveKitStore(next);
-  return { servers: serverCount, skills: skillCount, importedAt };
+  const { failed } = applySync("all", null);
+  return { servers: serverCount, skills: skillCount, conflicts: [...conflicts], failed, importedAt };
 }

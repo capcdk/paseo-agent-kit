@@ -1,6 +1,7 @@
 import { applySync } from "./sync";
+import { findHarness, harnesses } from "./harness";
 import { loadKitStore, saveKitStore } from "./kit-store";
-import { runCli } from "./probe";
+import { t } from "./locale";
 import { globalLockReason, readProjects, relocateSkillSource, syncSkills } from "./skills";
 
 function nextProjectIds(ids: readonly string[], projectId: string, mount: boolean): string[] {
@@ -13,7 +14,7 @@ function nextProjectIds(ids: readonly string[], projectId: string, mount: boolea
 export function projectRoot(projectId: string): string {
   const project = readProjects().find((entry) => entry.projectId === projectId);
   if (!project) {
-    throw new Error(`未知项目：${projectId}`);
+    throw new Error(t("unknownProject", { id: projectId }));
   }
   return project.rootPath;
 }
@@ -24,39 +25,39 @@ function throwIfFailed(failed: readonly { path: string; error: string }[]): void
   }
 }
 
-/**
- * Cursor refuses to load project-level MCP servers until they are approved
- * (`not loaded (needs approval)`). Approval keys embed a config hash, so this
- * must rerun whenever the server definition changes.
- */
-export async function approveCursorProjectMcp(rootPath: string, name: string): Promise<void> {
-  const run = await runCli("agent", ["mcp", "enable", name], rootPath);
-  if (run.code !== 0) {
-    throw new Error(`Cursor 审批 ${name} 失败：${run.out.trim().slice(-180) || `退出码 ${run.code}`}`);
+/** Approval keys may embed a config hash, so this reruns whenever a project entry is written or changed. */
+async function approveEverywhere(rootPath: string, name: string): Promise<void> {
+  await Promise.all(
+    harnesses().map((harness) => (harness.mcp.projectPath && harness.mcp.approveProject ? harness.mcp.approveProject(rootPath, name) : null)),
+  );
+}
+
+export async function approveProjectMcp(harnessId: string, rootPath: string, name: string): Promise<void> {
+  const harness = findHarness(harnessId);
+  if (!harness.mcp.approveProject) {
+    throw new Error(t("noApproval", { harness: harness.label }));
   }
+  await harness.mcp.approveProject(rootPath, name);
 }
 
 export async function reapproveMountedMcp(name: string): Promise<void> {
   const def = loadKitStore().servers.find((server) => server.name === name);
-  if (!def || !def.enabled) {
-    return;
-  }
-  if (def.userLevel) {
+  if (!def || !def.enabled || def.userLevel) {
     return;
   }
   const projects = readProjects().filter((project) => def.projectIds.includes(project.projectId));
-  await Promise.all(projects.map((project) => approveCursorProjectMcp(project.rootPath, name)));
+  await Promise.all(projects.map((project) => approveEverywhere(project.rootPath, name)));
 }
 
 export function setSkillUserLevel(name: string, userLevel: boolean): void {
   const store = loadKitStore();
   const def = store.skills.find((skill) => skill.name === name);
   if (!def) {
-    throw new Error(`未知 Skill：${name}`);
+    throw new Error(t("unknownSkill", { name }));
   }
   const lock = globalLockReason(name);
   if (!userLevel && lock) {
-    throw new Error(`${name} 无法取消全局：${lock}`);
+    throw new Error(t("cannotUnglobal", { name, reason: lock }));
   }
   const sourcePath = userLevel ? def.sourcePath : relocateSkillSource(name, def.sourcePath);
   saveKitStore({
@@ -69,7 +70,7 @@ export function setSkillUserLevel(name: string, userLevel: boolean): void {
 export async function setUserLevel(name: string, userLevel: boolean): Promise<void> {
   const store = loadKitStore();
   if (!store.servers.some((server) => server.name === name)) {
-    throw new Error(`未知 MCP：${name}`);
+    throw new Error(t("unknownMcp", { name }));
   }
   saveKitStore({
     ...store,
@@ -87,10 +88,10 @@ export async function setProjectMount(kind: "mcp" | "skill", name: string, proje
   if (kind === "mcp") {
     const def = store.servers.find((server) => server.name === name);
     if (!def) {
-      throw new Error(`未知 MCP：${name}`);
+      throw new Error(t("unknownMcp", { name }));
     }
     if (def.userLevel) {
-      throw new Error(`${name} 已全局加载，无需按项目挂载`);
+      throw new Error(t("alreadyGlobal", { name }));
     }
     saveKitStore({
       ...store,
@@ -100,16 +101,16 @@ export async function setProjectMount(kind: "mcp" | "skill", name: string, proje
     });
     throwIfFailed(applySync("project", projectId).failed);
     if (mount && def.enabled) {
-      await approveCursorProjectMcp(rootPath, name);
+      await approveEverywhere(rootPath, name);
     }
     return;
   }
   const skillDef = store.skills.find((skill) => skill.name === name);
   if (!skillDef) {
-    throw new Error(`未知 Skill：${name}`);
+    throw new Error(t("unknownSkill", { name }));
   }
   if (skillDef.userLevel) {
-    throw new Error(`${name} 已全局加载，无需按项目挂载`);
+    throw new Error(t("alreadyGlobal", { name }));
   }
   saveKitStore({
     ...store,
