@@ -1,5 +1,4 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import type { McpServerConfig } from "@getpaseo/protocol/agent-types";
 import {
   kitStatusRpc,
   importRpc,
@@ -59,7 +58,7 @@ export default function contribute(server: PluginServerContext) {
     if (injectable.length === 0) {
       return;
     }
-    const injected: Record<string, McpServerConfig> = {};
+    const injected: NonNullable<(typeof request)["config"]["mcpServers"]> = {};
     for (const def of injectable) {
       injected[def.name] = def.url
         ? { type: "http", url: def.url, ...(def.headers ? { headers: def.headers } : {}) }
