@@ -19,7 +19,7 @@ export function projectRoot(projectId: string): string {
   return project.rootPath;
 }
 
-function throwIfFailed(failed: readonly { path: string; error: string }[]): void {
+export function throwIfFailed(failed: readonly { path: string; error: string }[]): void {
   if (failed.length > 0) {
     throw new Error(failed.map((failure) => `${failure.path}: ${failure.error}`).join("\n"));
   }

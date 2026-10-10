@@ -5,6 +5,7 @@ import { readJsonDoc } from "./mcp-config";
 import { loadKitStore } from "./kit-store";
 import { autoScannedUserSkillRoots, harnesses, projectSkillRoots } from "./harness";
 import { t } from "./locale";
+import { isNpxOwned } from "./npx";
 
 const PROJECTS_PATH = join(homedir(), ".paseo", "projects", "projects.json");
 
@@ -153,7 +154,13 @@ export const MANAGED_SKILLS_ROOT = join(homedir(), ".paseo", "agent-kit", "skill
 
 /** Paseo copies its bundled skills back into ~/.agents/skills, so they cannot leave the user level. */
 export function globalLockReason(name: string): string | null {
-  return name === "paseo" || name.startsWith("paseo-") ? t("paseoBundledLock") : null;
+  if (name === "paseo" || name.startsWith("paseo-")) {
+    return t("paseoBundledLock");
+  }
+  if (isNpxOwned(name)) {
+    return t("npxManagedLock");
+  }
+  return null;
 }
 
 function isInside(path: string, root: string): boolean {
@@ -166,6 +173,9 @@ function isInside(path: string, root: string): boolean {
  * first; syncSkills then re-links the new path wherever the skill is still bound.
  */
 export function relocateSkillSource(name: string, sourcePath: string): string {
+  if (isNpxOwned(name)) {
+    throw new Error(t("cannotUnglobal", { name, reason: t("npxManagedLock") }));
+  }
   const source = sourcePath.replace(/\/+$/, "");
   const userRoots = autoScannedUserSkillRoots();
   if (!userRoots.some((root) => isInside(source, root))) {
@@ -192,6 +202,12 @@ export function relocateSkillSource(name: string, sourcePath: string): string {
   return target;
 }
 
+/** YAML allows quoted names (`name: "foo"`); the quotes must not leak into paths. */
+function unquoteYamlScalar(value: string): string {
+  const match = /^(["'])(.*)\1$/.exec(value);
+  return match ? match[2] : value;
+}
+
 /** Scan a skills root for directories containing SKILL.md with a name field. */
 export function listSkillsInRoot(root: string): { name: string; sourcePath: string }[] {
   if (!existsSync(root)) {
@@ -208,7 +224,7 @@ export function listSkillsInRoot(root: string): { name: string; sourcePath: stri
     }
     const raw = readFileSync(skillMd, "utf8");
     const match = /^name:\s*(\S+)/m.exec(raw);
-    out.push({ name: match?.[1] ?? entry.name, sourcePath: join(root, entry.name) });
+    out.push({ name: unquoteYamlScalar(match?.[1] ?? entry.name), sourcePath: join(root, entry.name) });
   }
   return out;
 }

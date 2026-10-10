@@ -8,7 +8,9 @@ import {
   serverDeleteRpc,
   serverUpsertRpc,
   skillDeleteRpc,
+  skillInstallRpc,
   skillSyncRpc,
+  skillUpdateRpc,
   skillUpsertRpc,
   syncRpc,
   trustRpc,
@@ -20,6 +22,7 @@ import { loadKitStore, saveKitStore } from "./server/kit-store";
 import { importFromHarnesses } from "./server/import";
 import { harnesses } from "./server/harness";
 import { setDeviceLocale, t } from "./server/locale";
+import { isNpxOwned, npxInstall, npxOutputTail, npxRemove, npxUpdate } from "./server/npx";
 import {
   approveProjectMcp,
   projectRoot,
@@ -27,6 +30,7 @@ import {
   setProjectMount,
   setSkillUserLevel,
   setUserLevel,
+  throwIfFailed,
 } from "./server/mount";
 import { readProjects, syncSkills } from "./server/skills";
 
@@ -118,7 +122,11 @@ export default function contribute(server: PluginServerContext) {
     return { ok: true as const };
   });
 
-  server.handle(importRpc, async () => importFromHarnesses());
+  server.handle(importRpc, async () => {
+    const result = importFromHarnesses();
+    const sync = syncSkills();
+    return { ...result, failed: [...result.failed, ...sync.failed] };
+  });
 
   server.handle(serverUpsertRpc, async ({ previousName, server: def }) => {
     const store = loadKitStore();
@@ -146,12 +154,49 @@ export default function contribute(server: PluginServerContext) {
     return { ok: true } as const;
   });
 
+  // Uninstall order matters: sweep our links while the entity is still on disk,
+  // then let the CLI remove its own canonical copy and lock entry.
   server.handle(skillDeleteRpc, async ({ name }) => {
     const store = loadKitStore();
     const removed = store.skills.filter((entry) => entry.name === name).map((entry) => entry.sourcePath);
+    if (removed.length === 0) {
+      throw new Error(t("unknownSkill", { name }));
+    }
     saveKitStore({ ...store, skills: store.skills.filter((entry) => entry.name !== name) });
-    void syncSkills(removed);
+    throwIfFailed(syncSkills(removed).failed);
+    if (isNpxOwned(name)) {
+      const run = await npxRemove(name);
+      if (run.code !== 0) {
+        throw new Error(t("npxCommandFailed", { detail: npxOutputTail(run) }));
+      }
+    }
     return { ok: true } as const;
+  });
+
+  server.handle(skillUpdateRpc, async ({ name }) => {
+    if (!isNpxOwned(name)) {
+      throw new Error(t("notNpxManaged", { name }));
+    }
+    const run = await npxUpdate(name);
+    if (run.code !== 0) {
+      throw new Error(t("npxCommandFailed", { detail: npxOutputTail(run) }));
+    }
+    throwIfFailed(syncSkills().failed);
+    return { ok: true } as const;
+  });
+
+  server.handle(skillInstallRpc, async ({ repo, skills }) => {
+    const before = new Set(loadKitStore().skills.map((entry) => entry.name));
+    const run = await npxInstall(repo, skills);
+    if (run.code !== 0) {
+      throw new Error(t("npxCommandFailed", { detail: npxOutputTail(run) }));
+    }
+    const result = importFromHarnesses();
+    const sync = syncSkills();
+    const added = loadKitStore()
+      .skills.map((entry) => entry.name)
+      .filter((name) => !before.has(name));
+    return { ok: true as const, added, failed: [...result.failed, ...sync.failed] };
   });
 
   server.handle(skillSyncRpc, async () => syncSkills());

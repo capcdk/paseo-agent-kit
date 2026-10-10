@@ -31,7 +31,7 @@ export function classifyLoad(detail: string): LoadState {
   return "failed";
 }
 
-function stripAnsi(text: string): string {
+export function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
@@ -58,7 +58,7 @@ function detailFromLine(line: string, name: string): string {
   return rest || line;
 }
 
-export function runCli(cmd: string, args: readonly string[], cwd: string): Promise<CliRun> {
+export function runCli(cmd: string, args: readonly string[], cwd: string, timeoutMs: number = CLI_TIMEOUT_MS): Promise<CliRun> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
@@ -87,7 +87,7 @@ export function runCli(cmd: string, args: readonly string[], cwd: string): Promi
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       finish({ code: null, out: `${out}\n${t("timedOut")}` });
-    }, CLI_TIMEOUT_MS);
+    }, timeoutMs);
     stdout.setEncoding("utf8");
     stderr.setEncoding("utf8");
     stdout.on("data", (chunk: string) => {

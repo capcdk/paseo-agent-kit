@@ -9,6 +9,9 @@ import {
   localeRpc,
   mountRpc,
   probeRpc,
+  skillDeleteRpc,
+  skillInstallRpc,
+  skillUpdateRpc,
   trustRpc,
   userLevelRpc,
   type CatalogItem,
@@ -342,6 +345,8 @@ function ItemRow({
   onMount,
   onUserLevel,
   onTrust,
+  onUpdate,
+  onUninstall,
 }: {
   item: CatalogItem;
   kind: Kind;
@@ -359,7 +364,15 @@ function ItemRow({
   onMount: (mount: boolean) => void;
   onUserLevel: (userLevel: boolean) => void;
   onTrust: (harness: HarnessColumn) => void;
+  onUpdate: () => void;
+  onUninstall: () => void;
 }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!expanded) {
+      setArmed(false);
+    }
+  }, [expanded]);
   const states = harnesses.map((harness) => {
     const cell = cells[cellKey(kind, item.name, harness.id)];
     const state: DotState = cell?.state ?? (probe?.status === "loading" || !probe ? "pending" : "failed");
@@ -445,6 +458,18 @@ function ItemRow({
       </View>
       {expanded ? (
         <View style={{ paddingLeft: 34, paddingRight: 14, paddingBottom: 12, gap: 6 }}>
+          {item.npxOwned ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Button label={tr("updateAction")} icon="RefreshCw" theme={theme} disabled={busy} onPress={onUpdate} />
+              <Button
+                label={tr(armed ? "confirmUninstall" : "uninstallAction")}
+                icon="Trash2"
+                theme={theme}
+                disabled={busy}
+                onPress={() => (armed ? onUninstall() : setArmed(true))}
+              />
+            </View>
+          ) : null}
           {states.map(({ harness, state, detail }) => (
             <View key={harness.id} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
               <View style={{ width: 64, flexDirection: "row", alignItems: "center", gap: 6, paddingTop: 1 }}>
@@ -507,6 +532,9 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
   const requestUserLevel = useRpc(userLevelRpc);
   const requestTrust = useRpc(trustRpc);
   const requestLocale = useRpc(localeRpc);
+  const requestDelete = useRpc(skillDeleteRpc);
+  const requestUpdate = useRpc(skillUpdateRpc);
+  const requestInstall = useRpc(skillInstallRpc);
   const toast = useToast();
   const deviceLocale = useMemo(() => detectLocale(), []);
   const [status, setStatus] = useState<KitStatus | null>(null);
@@ -517,6 +545,9 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
   const [kind, setKind] = useState<Kind>("mcp");
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [showInstall, setShowInstall] = useState(false);
+  const [repo, setRepo] = useState("");
+  const [installSkills, setInstallSkills] = useState("");
   const [probes, setProbes] = useState<Record<string, ProbeState>>({});
   const generation = useRef(0);
 
@@ -579,7 +610,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
   const tr = useCallback<Tr>((key, vars) => translate(locale, key, vars), [locale]);
 
   const run = useCallback(
-    async <Result,>(action: () => Promise<Result>, done: (result: Result) => string) => {
+    async <Result,>(action: () => Promise<Result>, done: (result: Result) => string): Promise<boolean> => {
       setBusy(true);
       try {
         const result = await action();
@@ -588,14 +619,39 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
           toast.show(message, { variant: "success" });
         }
         await load();
+        return true;
       } catch (cause) {
         toast.error(errorText(cause));
+        return false;
       } finally {
         setBusy(false);
       }
     },
     [load, toast],
   );
+
+  const installNames = installSkills.split(/[\s,]+/).filter(Boolean);
+
+  const submitInstall = async () => {
+    const target = repo.trim();
+    if (!target || installNames.length === 0) {
+      return;
+    }
+    const ok = await run(
+      () => requestInstall({ repo: target, skills: installNames }),
+      (result) => {
+        if (result.failed.length > 0) {
+          toast.error(tr("importFailed", { paths: result.failed.map((failure) => failure.path).join(tr("listSep")) }));
+        }
+        return result.added.length === 0 ? tr("installNone") : tr("installDone", { skills: result.added.join(tr("listSep")) });
+      },
+    );
+    if (ok) {
+      setShowInstall(false);
+      setRepo("");
+      setInstallSkills("");
+    }
+  };
 
   const project = status?.projects.find((entry) => entry.projectId === selectedId) ?? null;
   const probe = selectedId ? probes[selectedId] : undefined;
@@ -649,6 +705,15 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
                 label: value === "auto" ? tr("langAuto") : value === "en" ? "English" : "中文",
               }))}
             />
+            {status && kind === "skill" ? (
+              <Button
+                label={tr("installAction")}
+                icon="Plus"
+                theme={theme}
+                disabled={loading || busy}
+                onPress={() => setShowInstall((current) => !current)}
+              />
+            ) : null}
             {status ? (
               <Button
                 label={tr(status.importedAt ? "rescanButton" : "importButton")}
@@ -678,6 +743,81 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
             <Button label={tr(loading ? "refreshing" : "refresh")} icon="RefreshCw" theme={theme} disabled={loading} onPress={() => void load()} />
           </View>
         </View>
+
+        {showInstall && kind === "skill" ? (
+          <View
+            style={{
+              gap: 10,
+              padding: 14,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.surface1,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <Text style={{ color: theme.colors.foreground, fontSize: 14, fontWeight: "600" }}>{tr("installAction")}</Text>
+              <Button label={tr("installCancel")} theme={theme} disabled={busy} onPress={() => setShowInstall(false)} />
+            </View>
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>{tr("installHint")}</Text>
+            <View style={{ flexDirection: layout.compact ? "column" : "row", gap: 8 }}>
+              <View
+                style={{
+                  flex: layout.compact ? undefined : 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingHorizontal: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  backgroundColor: theme.colors.surface2,
+                }}
+              >
+                <TextInput
+                  value={repo}
+                  onChangeText={setRepo}
+                  placeholder={tr("installRepoPlaceholder")}
+                  placeholderTextColor={theme.colors.foregroundMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{ flex: 1, color: theme.colors.foreground, fontSize: 12, paddingVertical: 7 }}
+                />
+              </View>
+              <View
+                style={{
+                  flex: layout.compact ? undefined : 1,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingHorizontal: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  backgroundColor: theme.colors.surface2,
+                }}
+              >
+                <TextInput
+                  value={installSkills}
+                  onChangeText={setInstallSkills}
+                  placeholder={tr("installSkillsPlaceholder")}
+                  placeholderTextColor={theme.colors.foregroundMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{ flex: 1, color: theme.colors.foreground, fontSize: 12, paddingVertical: 7 }}
+                />
+              </View>
+            </View>
+            <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+              <Button
+                label={tr("installSubmit")}
+                icon="Download"
+                primary
+                theme={theme}
+                disabled={busy || !repo.trim() || installNames.length === 0}
+                onPress={() => void submitInstall()}
+              />
+            </View>
+          </View>
+        ) : null}
 
         {error ? (
           <View style={{ padding: 12, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.statusDanger, backgroundColor: theme.colors.surface1 }}>
@@ -832,6 +972,18 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
                           void run(
                             () => requestTrust({ harness: harness.id, name: item.name, projectId: project.projectId }),
                             () => tr("trusted", { name: item.name, harness: harness.label, project: project.name }),
+                          )
+                        }
+                        onUpdate={() =>
+                          void run(
+                            () => requestUpdate({ name: item.name }),
+                            () => tr("updatedToast", { name: item.name }),
+                          )
+                        }
+                        onUninstall={() =>
+                          void run(
+                            () => requestDelete({ name: item.name }),
+                            () => tr("uninstalledToast", { name: item.name }),
                           )
                         }
                       />

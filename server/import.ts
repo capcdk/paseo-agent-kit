@@ -4,6 +4,7 @@ import type { KitStore, McpServerDef, SkillDef } from "../shared/store";
 import { harnesses, type HarnessDef } from "./harness";
 import { loadKitStore, saveKitStore } from "./kit-store";
 import { readJsonDoc, serversEqual } from "./mcp-config";
+import { canonicalSkillPath, isNpxOwned } from "./npx";
 import { listSkillsInRoot, readProjects } from "./skills";
 import { applySync } from "./sync";
 
@@ -118,6 +119,15 @@ export function importFromHarnesses(): ImportResult {
     }
     const existing = skillByName.get(name);
     if (existing) {
+      // The npx skills copy under ~/.agents/skills is canonical: when a skill is
+      // locked to the CLI, point the entry at that copy instead of a clone or link.
+      if (isNpxOwned(name)) {
+        const canonical = canonicalSkillPath(name);
+        const canonicalReal = canonical ? realPath(canonical) : null;
+        if (canonicalReal && canonicalReal !== realPath(existing.sourcePath)) {
+          existing.sourcePath = canonicalReal;
+        }
+      }
       if (realPath(existing.sourcePath) !== real) {
         conflicts.add(`Skill ${name} (${existing.sourcePath} ≠ ${real})`);
       } else if (projectId !== null && !existing.userLevel && !existing.projectIds.includes(projectId)) {

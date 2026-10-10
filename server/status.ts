@@ -4,6 +4,7 @@ import type { McpServerDef } from "../shared/store";
 import { harnesses } from "./harness";
 import { loadKitStore } from "./kit-store";
 import { t } from "./locale";
+import { isNpxOwned } from "./npx";
 import { staticCells, type ProbeNames } from "./probe";
 import { globalLockReason, readProjects } from "./skills";
 
@@ -36,12 +37,19 @@ export function buildKitStatus(): KitStatus {
         projectSkills: Boolean(harness.skills?.projectLink && harness.skills.projectLoaded),
         canApprove: Boolean(harness.mcp.projectPath && harness.mcp.approveProject),
       })),
-    mcp: mcp.map((def) => ({ name: def.name, summary: mcpSummary(def), userLevel: def.userLevel, globalLock: null })),
+    mcp: mcp.map((def) => ({
+      name: def.name,
+      summary: mcpSummary(def),
+      userLevel: def.userLevel,
+      globalLock: null,
+      npxOwned: false,
+    })),
     skills: skills.map((def) => ({
       name: def.name,
       summary: def.sourcePath,
       userLevel: def.userLevel,
       globalLock: globalLockReason(def.name),
+      npxOwned: isNpxOwned(def.name),
     })),
     projects: projects.map((project) => ({
       projectId: project.projectId,

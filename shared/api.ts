@@ -53,6 +53,8 @@ export const CatalogItemSchema = z.object({
   userLevel: z.boolean(),
   /** why the global toggle cannot be turned off; null = free to change */
   globalLock: z.string().nullable(),
+  /** installed via the npx skills CLI: update/uninstall delegate to it */
+  npxOwned: z.boolean(),
 });
 
 export const HarnessColumnSchema = z.object({
@@ -148,6 +150,26 @@ export const skillDeleteRpc = defineRpc({
   name: "agent-kit.skill-delete",
   input: z.object({ name: z.string() }),
   output: z.object({ ok: z.literal(true) }),
+});
+
+export const skillUpdateRpc = defineRpc({
+  name: "agent-kit.skill-update",
+  input: z.object({ name: z.string() }),
+  output: z.object({ ok: z.literal(true) }),
+});
+
+export const skillInstallRpc = defineRpc({
+  name: "agent-kit.skill-install",
+  input: z.object({
+    repo: z.string().min(1),
+    skills: z.array(z.string().min(1)).min(1),
+  }),
+  output: z.object({
+    ok: z.literal(true),
+    /** names that were newly imported into the kit after the install */
+    added: z.array(z.string()),
+    failed: z.array(z.object({ path: z.string(), error: z.string() })),
+  }),
 });
 
 export const skillSyncRpc = defineRpc({

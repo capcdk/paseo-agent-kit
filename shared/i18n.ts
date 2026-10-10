@@ -30,6 +30,9 @@ const en = {
   linkOccupied: "A real directory is already there; left untouched",
   noApproval: "{harness} has no approval step",
   approveFailed: "{harness} approval of {name} failed: {detail}",
+  notNpxManaged: "{name} is not managed by npx skills",
+  npxCommandFailed: "npx skills failed: {detail}",
+  npxManagedLock: "Installed via npx skills (recorded in ~/.agents/.skill-lock.json). Update or uninstall it instead of turning Global off.",
 
   // server: CLI runs and load checks
   exitCode: "exit code {code}",
@@ -68,6 +71,14 @@ const en = {
   importDone: "Imported {servers} MCP servers and {skills} skills",
   importConflicts: "{count} name conflicts kept the first definition found: {names}",
   importFailed: "Import finished but some files could not be written: {paths}",
+  installAction: "Install skill",
+  installHint: "Runs npx skills add into ~/.agents/skills, then imports and distributes it like any other skill.",
+  installRepoPlaceholder: "Repository (GitHub / GitLab / git URL)",
+  installSkillsPlaceholder: "Skill names, comma separated",
+  installSubmit: "Install",
+  installCancel: "Cancel",
+  installDone: "Installed {skills}",
+  installNone: "Command finished but no new skill was imported",
 
   // client: empty states
   emptyCatalogTitle: "Nothing managed yet",
@@ -107,6 +118,9 @@ const en = {
   a11yMountLocked: "{name} loads globally; the project mount can't be changed",
   a11yUnmount: "Unmount {name} from this project",
   a11yMount: "Mount {name} on this project",
+  updateAction: "Update",
+  uninstallAction: "Uninstall",
+  confirmUninstall: "Confirm uninstall",
 
   // client: toasts
   mounted: "Mounted {name} on {project}",
@@ -114,6 +128,8 @@ const en = {
   globalOn: "{name} now loads in every session",
   globalOff: "{name} no longer loads globally; only mounted projects get it",
   trusted: "Trusted {name} in {harness} ({project})",
+  updatedToast: "Updated {name}",
+  uninstalledToast: "Uninstalled {name}",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -132,6 +148,9 @@ const zh: Record<MessageKey, string> = {
   linkOccupied: "目标位置已被真实目录占用，未覆盖",
   noApproval: "{harness} 没有审批步骤",
   approveFailed: "{harness} 审批 {name} 失败：{detail}",
+  notNpxManaged: "{name} 不是由 npx skills 安装的",
+  npxCommandFailed: "npx skills 执行失败：{detail}",
+  npxManagedLock: "由 npx skills 安装（记录在 ~/.agents/.skill-lock.json），请改用更新或卸载操作，不能取消全局。",
 
   exitCode: "退出码 {code}",
   noPipes: "子进程没有输出管道",
@@ -167,6 +186,14 @@ const zh: Record<MessageKey, string> = {
   importDone: "已导入 {servers} 个 MCP、{skills} 个 Skill",
   importConflicts: "{count} 个同名冲突，保留了先扫描到的定义：{names}",
   importFailed: "导入完成，但部分文件写入失败：{paths}",
+  installAction: "安装 Skill",
+  installHint: "通过 npx skills add 安装到 ~/.agents/skills，随后自动导入并按下发规则分发。",
+  installRepoPlaceholder: "仓库（GitHub / GitLab / git 地址）",
+  installSkillsPlaceholder: "Skill 名称，用逗号分隔",
+  installSubmit: "安装",
+  installCancel: "取消",
+  installDone: "已安装 {skills}",
+  installNone: "命令已完成，但没有导入新 Skill",
 
   emptyCatalogTitle: "还没有接管任何配置",
   emptyCatalogHint: "从 {harnesses} 的用户级和项目级配置导入现有的 MCP 和 Skill，之后在这里统一挂载到各项目。",
@@ -201,12 +228,17 @@ const zh: Record<MessageKey, string> = {
   a11yMountLocked: "{name} 已全局加载，项目挂载不可调整",
   a11yUnmount: "从当前项目卸载 {name}",
   a11yMount: "挂载 {name} 到当前项目",
+  updateAction: "更新",
+  uninstallAction: "卸载",
+  confirmUninstall: "确认卸载",
 
   mounted: "已挂载 {name} 到 {project}",
   unmounted: "已从 {project} 卸载 {name}",
   globalOn: "{name} 已设为全局加载",
   globalOff: "{name} 已取消全局，仅在挂载的项目中加载",
   trusted: "已在 {harness} 信任 {name}（{project}）",
+  updatedToast: "{name} 已更新",
+  uninstalledToast: "已卸载 {name}",
 };
 
 const MESSAGES: Record<Locale, Record<MessageKey, string>> = { en, zh };
