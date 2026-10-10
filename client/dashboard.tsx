@@ -10,6 +10,7 @@ import {
   mountRpc,
   probeRpc,
   skillDeleteRpc,
+  skillDiscoverRpc,
   skillInstallRpc,
   skillUpdateRpc,
   trustRpc,
@@ -29,6 +30,9 @@ type Kind = "mcp" | "skill";
 type DotState = LoadState | "pending";
 type Cell = { state: LoadState; detail: string };
 type ProbeState = { status: "loading" } | { status: "done"; cells: Record<string, Cell> } | { status: "error"; message: string };
+/** react-native-web paints the browser's rectangular focus outline over our rounded wrapper; the wrapper already frames the input. */
+const NO_FOCUS_RING = { outlineStyle: "none", outlineWidth: 0 } as object;
+
 type Tr = (key: MessageKey, vars?: Vars) => string;
 
 const STATE_KEY: Record<DotState, MessageKey> = {
@@ -535,6 +539,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
   const requestDelete = useRpc(skillDeleteRpc);
   const requestUpdate = useRpc(skillUpdateRpc);
   const requestInstall = useRpc(skillInstallRpc);
+  const requestDiscover = useRpc(skillDiscoverRpc);
   const toast = useToast();
   const deviceLocale = useMemo(() => detectLocale(), []);
   const [status, setStatus] = useState<KitStatus | null>(null);
@@ -547,7 +552,10 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showInstall, setShowInstall] = useState(false);
   const [repo, setRepo] = useState("");
-  const [installSkills, setInstallSkills] = useState("");
+  const [found, setFound] = useState<{ name: string; description: string; installed: boolean }[] | null>(null);
+  const [skippedCount, setSkippedCount] = useState(0);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const [discovering, setDiscovering] = useState(false);
   const [probes, setProbes] = useState<Record<string, ProbeState>>({});
   const generation = useRef(0);
 
@@ -630,7 +638,43 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
     [load, toast],
   );
 
-  const installNames = installSkills.split(/[\s,]+/).filter(Boolean);
+  const installNames = [...picked];
+
+  const changeRepo = (value: string) => {
+    setRepo(value);
+    setFound(null);
+    setPicked(new Set());
+    setSkippedCount(0);
+  };
+
+  const discover = async () => {
+    const target = repo.trim();
+    if (!target || discovering) {
+      return;
+    }
+    setDiscovering(true);
+    try {
+      const result = await requestDiscover({ repo: target });
+      setFound(result.skills);
+      setSkippedCount(result.skipped);
+      setPicked(new Set());
+    } catch (cause) {
+      setFound(null);
+      toast.error(errorText(cause));
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const togglePick = (name: string) => {
+    setPicked((current) => {
+      const next = new Set(current);
+      if (!next.delete(name)) {
+        next.add(name);
+      }
+      return next;
+    });
+  };
 
   const submitInstall = async () => {
     const target = repo.trim();
@@ -648,8 +692,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
     );
     if (ok) {
       setShowInstall(false);
-      setRepo("");
-      setInstallSkills("");
+      changeRepo("");
     }
   };
 
@@ -760,10 +803,10 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
               <Button label={tr("installCancel")} theme={theme} disabled={busy} onPress={() => setShowInstall(false)} />
             </View>
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>{tr("installHint")}</Text>
-            <View style={{ flexDirection: layout.compact ? "column" : "row", gap: 8 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
               <View
                 style={{
-                  flex: layout.compact ? undefined : 1,
+                  flex: 1,
                   flexDirection: "row",
                   alignItems: "center",
                   paddingHorizontal: 10,
@@ -775,47 +818,108 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
               >
                 <TextInput
                   value={repo}
-                  onChangeText={setRepo}
+                  onChangeText={changeRepo}
+                  onSubmitEditing={() => void discover()}
                   placeholder={tr("installRepoPlaceholder")}
                   placeholderTextColor={theme.colors.foregroundMuted}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  style={{ flex: 1, color: theme.colors.foreground, fontSize: 12, paddingVertical: 7 }}
+                  style={[{ flex: 1, color: theme.colors.foreground, fontSize: 12, paddingVertical: 7 }, NO_FOCUS_RING]}
                 />
               </View>
-              <View
-                style={{
-                  flex: layout.compact ? undefined : 1,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  paddingHorizontal: 10,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  backgroundColor: theme.colors.surface2,
-                }}
-              >
-                <TextInput
-                  value={installSkills}
-                  onChangeText={setInstallSkills}
-                  placeholder={tr("installSkillsPlaceholder")}
-                  placeholderTextColor={theme.colors.foregroundMuted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  style={{ flex: 1, color: theme.colors.foreground, fontSize: 12, paddingVertical: 7 }}
-                />
-              </View>
-            </View>
-            <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
               <Button
-                label={tr("installSubmit")}
-                icon="Download"
-                primary
+                label={tr(discovering ? "installDiscovering" : "installDiscover")}
+                icon="Search"
                 theme={theme}
-                disabled={busy || !repo.trim() || installNames.length === 0}
-                onPress={() => void submitInstall()}
+                disabled={busy || discovering || !repo.trim()}
+                onPress={() => void discover()}
               />
             </View>
+            {found ? (
+              <View style={{ gap: 8 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+                    {tr("installFound", { count: found.length })}
+                    {skippedCount > 0 ? ` · ${tr("installSkipped", { count: skippedCount })}` : ""}
+                  </Text>
+                  <View style={{ flexDirection: "row", gap: 6 }}>
+                    <Button
+                      label={tr("installSelectAll")}
+                      theme={theme}
+                      disabled={busy}
+                      onPress={() => setPicked(new Set(found.filter((skill) => !skill.installed).map((skill) => skill.name)))}
+                    />
+                    <Button label={tr("installSelectNone")} theme={theme} disabled={busy || picked.size === 0} onPress={() => setPicked(new Set())} />
+                  </View>
+                </View>
+                <ScrollView
+                  style={{ maxHeight: 280, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface2 }}
+                >
+                  {found.map((skill, index) => {
+                    const on = picked.has(skill.name);
+                    return (
+                      <Pressable
+                        key={skill.name}
+                        accessibilityRole="checkbox"
+                        accessibilityLabel={skill.name}
+                        accessibilityState={{ checked: on, disabled: skill.installed }}
+                        disabled={busy || skill.installed}
+                        onPress={() => togglePick(skill.name)}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "flex-start",
+                          gap: 10,
+                          paddingHorizontal: 10,
+                          paddingVertical: 8,
+                          borderTopWidth: index === 0 ? 0 : 1,
+                          borderTopColor: theme.colors.border,
+                          opacity: skill.installed ? 0.5 : 1,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 16,
+                            height: 16,
+                            marginTop: 1,
+                            borderRadius: 4,
+                            borderWidth: on ? 0 : 1,
+                            borderColor: theme.colors.border,
+                            alignItems: "center",
+                            justifyContent: "center",
+                            backgroundColor: on ? theme.colors.accent : theme.colors.surface1,
+                          }}
+                        >
+                          {on ? <Icon name="Check" size={12} color={theme.colors.accentForeground} /> : null}
+                        </View>
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                            <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>{skill.name}</Text>
+                            {skill.installed ? (
+                              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>{tr("installInstalledTag")}</Text>
+                            ) : null}
+                          </View>
+                          {skill.description ? (
+                            <Text numberOfLines={2} style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+                              {skill.description}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+                <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+                  <Button
+                    label={tr("installSubmit", { count: installNames.length })}
+                    icon="Download"
+                    primary
+                    theme={theme}
+                    disabled={busy || installNames.length === 0}
+                    onPress={() => void submitInstall()}
+                  />
+                </View>
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -886,7 +990,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
                   onChangeText={setQuery}
                   placeholder={tr("search", { kind: tr(KIND_KEY[kind]) })}
                   placeholderTextColor={theme.colors.foregroundMuted}
-                  style={{ flex: 1, color: theme.colors.foreground, fontSize: 12, paddingVertical: 7 }}
+                  style={[{ flex: 1, color: theme.colors.foreground, fontSize: 12, paddingVertical: 7 }, NO_FOCUS_RING]}
                 />
               </View>
             </View>

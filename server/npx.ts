@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { t } from "./locale";
 import { runCli, stripAnsi, type CliRun } from "./probe";
 
 /**
@@ -74,9 +75,67 @@ function npxSkills(args: readonly string[], timeoutMs?: number): Promise<CliRun>
  */
 export function npxInstall(repo: string, skills: readonly string[]): Promise<CliRun> {
   return npxSkills(
-    ["add", repo, ...skills.flatMap((name) => ["-s", name]), "-g", "-y", "-a", "universal", "--full-depth"],
+    ["add", assertRepoArg(repo), ...skills.flatMap((name) => ["-s", name]), "-g", "-y", "-a", "universal", "--full-depth"],
     NETWORK_TIMEOUT_MS,
   );
+}
+
+/** A repo argument must never be parsed by the CLI as a flag. */
+export function assertRepoArg(repo: string): string {
+  const value = repo.trim();
+  if (!value || value.startsWith("-")) {
+    throw new Error(t("invalidRepo"));
+  }
+  return value;
+}
+
+export function npxList(repo: string): Promise<CliRun> {
+  return npxSkills(["add", assertRepoArg(repo), "--list", "--full-depth"], NETWORK_TIMEOUT_MS);
+}
+
+export interface DiscoveredSkill {
+  readonly name: string;
+  readonly description: string;
+}
+
+/**
+ * Parses the human `add --list` listing ( `--json` refuses to run without -y,
+ * which would install ). Names sit at a 4-space indent under the `│` rail and
+ * descriptions below them; skipped (unparsable) skills are only counted.
+ */
+export function parseSkillList(out: string): { skills: DiscoveredSkill[]; skipped: number } {
+  const text = out.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
+  const skipped = (text.match(/^⚠ Skipped /gm) ?? []).length;
+  const skills: DiscoveredSkill[] = [];
+  let inList = false;
+  let current: { name: string; description: string[] } | null = null;
+  const flush = () => {
+    if (current) {
+      skills.push({ name: current.name, description: current.description.join(" ").replace(/\s+/g, " ").trim() });
+    }
+    current = null;
+  };
+  for (const line of text.split("\n")) {
+    if (!inList) {
+      inList = /Available Skills/.test(line);
+      continue;
+    }
+    if (/^└/.test(line)) {
+      break;
+    }
+    const name = line.match(/^│ {4}([A-Za-z0-9][\w.-]*)\s*$/);
+    if (name) {
+      flush();
+      current = { name: name[1], description: [] };
+      continue;
+    }
+    const body = line.replace(/^│/, "").trim();
+    if (current && body) {
+      current.description.push(body);
+    }
+  }
+  flush();
+  return { skills, skipped };
 }
 
 export function npxRemove(name: string): Promise<CliRun> {

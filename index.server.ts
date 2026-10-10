@@ -8,6 +8,7 @@ import {
   serverDeleteRpc,
   serverUpsertRpc,
   skillDeleteRpc,
+  skillDiscoverRpc,
   skillInstallRpc,
   skillSyncRpc,
   skillUpdateRpc,
@@ -22,7 +23,7 @@ import { loadKitStore, saveKitStore } from "./server/kit-store";
 import { importFromHarnesses } from "./server/import";
 import { harnesses } from "./server/harness";
 import { setDeviceLocale, t } from "./server/locale";
-import { isNpxOwned, npxInstall, npxOutputTail, npxRemove, npxUpdate } from "./server/npx";
+import { isNpxOwned, npxInstall, npxList, npxOutputTail, npxRemove, npxUpdate, parseSkillList } from "./server/npx";
 import {
   approveProjectMcp,
   projectRoot,
@@ -183,6 +184,15 @@ export default function contribute(server: PluginServerContext) {
     }
     throwIfFailed(syncSkills().failed);
     return { ok: true } as const;
+  });
+
+  server.handle(skillDiscoverRpc, async ({ repo }) => {
+    const run = await npxList(repo);
+    const { skills, skipped } = parseSkillList(run.out);
+    if (run.code !== 0 || skills.length === 0) {
+      throw new Error(t("npxCommandFailed", { detail: npxOutputTail(run) }));
+    }
+    return { skills: skills.map((skill) => ({ ...skill, installed: isNpxOwned(skill.name) })), skipped };
   });
 
   server.handle(skillInstallRpc, async ({ repo, skills }) => {

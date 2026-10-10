@@ -158,6 +158,16 @@ export const skillUpdateRpc = defineRpc({
   output: z.object({ ok: z.literal(true) }),
 });
 
+export const skillDiscoverRpc = defineRpc({
+  name: "agent-kit.skill-discover",
+  input: z.object({ repo: z.string().min(1) }),
+  output: z.object({
+    skills: z.array(z.object({ name: z.string(), description: z.string(), installed: z.boolean() })),
+    /** skills the CLI found but could not parse (bad frontmatter) */
+    skipped: z.number(),
+  }),
+});
+
 export const skillInstallRpc = defineRpc({
   name: "agent-kit.skill-install",
   input: z.object({
