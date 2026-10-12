@@ -70,7 +70,7 @@ export default function contribute(server: PluginServerContext) {
     const injected: NonNullable<(typeof request)["config"]["mcpServers"]> = {};
     for (const def of injectable) {
       injected[def.name] = def.url
-        ? { type: "http", url: def.url, ...(def.headers ? { headers: def.headers } : {}) }
+        ? { type: def.transport === "sse" ? "sse" : "http", url: def.url, ...(def.headers ? { headers: def.headers } : {}) }
         : { type: "stdio", command: def.command ?? "", args: def.args ?? [], ...(def.env ? { env: def.env } : {}) };
     }
     return {

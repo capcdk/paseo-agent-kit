@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import type { Change, SyncResult } from "../shared/api";
+import type { Change, McpServer, SyncResult } from "../shared/api";
 import type { McpServerDef } from "../shared/store";
 import { loadOwnership, ownedFor, readJsonDoc, recordOwned, saveOwnership, serversEqual, writeJsonDoc } from "./mcp-config";
 import { harnesses, type HarnessDef, type ServerMap } from "./harness";
@@ -18,6 +18,11 @@ interface TargetPlan {
   readonly changes: readonly Change[];
 }
 
+/** The SSE marker is not part of serversEqual; compare it where the harness file can hold it. */
+function sameTransport(harness: HarnessDef, current: McpServer, wanted: McpServer): boolean {
+  return harness.mcp.format.keepsSse === false || (current.type === "sse") === (wanted.type === "sse");
+}
+
 function planTarget(
   harness: HarnessDef,
   scope: "user" | "project",
@@ -32,7 +37,7 @@ function planTarget(
     const current = existing[name];
     if (!current) {
       changes.push({ harness: harness.id, scope, projectId, path, op: "add", server: name });
-    } else if (!serversEqual(current, server)) {
+    } else if (!serversEqual(current, server) || !sameTransport(harness, current, server)) {
       changes.push({ harness: harness.id, scope, projectId, path, op: "update", server: name });
     }
   }
@@ -58,6 +63,8 @@ function defToServer(def: McpServerDef) {
     ...(def.env ? { env: def.env } : {}),
     ...(def.url ? { url: def.url } : {}),
     ...(def.headers ? { headers: def.headers } : {}),
+    // only SSE is spelled out; every other transport is implied by command/url
+    ...(def.url && def.transport === "sse" ? { type: "sse" } : {}),
     enabled: def.enabled,
   };
 }

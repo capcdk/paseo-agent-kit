@@ -10,6 +10,8 @@ import { cellsFromBullets, cellsFromHeaders, cellsFromLines, runCli, type ProbeN
 export type ServerMap = Record<string, McpServer>;
 
 export interface ConfigFormat {
+  /** false when the file format cannot tell SSE from HTTP, so a missing marker is not drift */
+  readonly keepsSse?: boolean;
   read(doc: unknown): ServerMap;
   write(doc: unknown, desired: ServerMap, owned: ReadonlySet<string>): unknown;
 }
@@ -140,6 +142,7 @@ const kimiFormat: ConfigFormat = {
 };
 
 export const opencodeFormat: ConfigFormat = {
+  keepsSse: false,
   read(doc) {
     const out: ServerMap = {};
     if (!isRecord(doc) || !isRecord(doc.mcp)) {
