@@ -54,6 +54,15 @@ function linkTarget(path: string): string | null {
   }
 }
 
+/** Whether two skill folders carry byte-identical SKILL.md files. */
+function sameSkillFile(a: string, b: string): boolean {
+  try {
+    return readFileSync(join(a, "SKILL.md")).equals(readFileSync(join(b, "SKILL.md")));
+  } catch {
+    return false;
+  }
+}
+
 function placeLink(sourceDir: string, linkPath: string): void {
   mkdirSync(linkPath.slice(0, linkPath.lastIndexOf("/")), { recursive: true });
   if (isManagedLink(linkPath)) {
@@ -108,6 +117,10 @@ export function syncSkills(removedSources: readonly string[] = []): SkillSyncRes
       const linkPath = join(base, def.name);
       desiredLinks.push(linkPath);
       if (existsSync(linkPath) && !isManagedLink(linkPath) && linkTarget(linkPath) === realSource) {
+        continue;
+      }
+      // a real copy of this very skill is already there: the harness loads it, nothing to link
+      if (existsSync(linkPath) && !isManagedLink(linkPath) && sameSkillFile(linkPath, def.sourcePath)) {
         continue;
       }
       if (existsSync(linkPath) && !isManagedLink(linkPath)) {
