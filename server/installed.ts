@@ -35,16 +35,21 @@ function isExecutable(path: string): boolean {
 }
 
 const CACHE_MS = 15_000;
-const cache = new Map<string, { at: number; found: boolean }>();
+const cache = new Map<string, { at: number; path: string | null }>();
 
-/** Whether `command` can be found on PATH or in a usual install directory. Cached briefly: sync paths call this a lot. */
-export function hasCommand(command: string): boolean {
+/** Absolute path of `command` on PATH or in a usual install directory, or null. Cached briefly: sync paths call this a lot. */
+export function findCommand(command: string): string | null {
   const hit = cache.get(command);
   const now = Date.now();
   if (hit && now - hit.at < CACHE_MS) {
-    return hit.found;
+    return hit.path;
   }
-  const found = searchDirs().some((dir) => isExecutable(join(dir, command)));
-  cache.set(command, { at: now, found });
-  return found;
+  const dir = searchDirs().find((entry) => isExecutable(join(entry, command)));
+  const path = dir ? join(dir, command) : null;
+  cache.set(command, { at: now, path });
+  return path;
+}
+
+export function hasCommand(command: string): boolean {
+  return findCommand(command) !== null;
 }

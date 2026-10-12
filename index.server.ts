@@ -82,8 +82,20 @@ export default function contribute(server: PluginServerContext) {
     };
   });
 
+  // Reconcile once at startup and again whenever the set of installed harnesses changes
+  // (plugin update that adds a harness, a CLI installed later): the catalog is the source of truth.
+  let reconciledFor = "";
   server.handle(kitStatusRpc, async ({ deviceLocale }) => {
     setDeviceLocale(deviceLocale);
+    const installed = harnesses().map((harness) => harness.id).join(",");
+    if (installed !== reconciledFor) {
+      reconciledFor = installed;
+      // never reconcile from an empty or unreadable catalog: that would strip every entry we own
+      const catalog = loadKitStore();
+      if (catalog.importedAt !== null && catalog.servers.length + catalog.skills.length > 0) {
+        applySync("all", null);
+      }
+    }
     return buildKitStatus();
   });
 

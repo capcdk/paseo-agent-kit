@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { LoadState, ProbeCell } from "../shared/api";
+import { findCommand } from "./installed";
 import { t } from "./locale";
 
 const CLI_TIMEOUT_MS = 45_000;
@@ -62,7 +63,7 @@ export function runCli(cmd: string, args: readonly string[], cwd: string, timeou
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(findCommand(cmd) ?? cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       resolve({ code: null, out: message });
@@ -123,6 +124,12 @@ function failedCells(kind: Kind, harness: string, names: readonly string[], fail
   return names.map((name) => ({ kind, name, harness, state, detail: failure }));
 }
 
+/** "Not listed", plus what the CLI actually printed so a surprising answer can be traced. */
+function notListedDetail(label: string, run: CliRun): string {
+  const seen = stripAnsi(run.out).replace(/[┌│└●]/g, " ").replace(/\s+/g, " ").trim().slice(0, 90);
+  return seen ? t("notListedSaw", { harness: label, output: seen }) : t("notListed", { harness: label });
+}
+
 /** CLI output with one line per item, where the text after the name carries its load state. */
 export function cellsFromLines(kind: Kind, harness: string, label: string, names: readonly string[], run: CliRun): ProbeCell[] {
   const failure = commandFailure(run);
@@ -132,7 +139,7 @@ export function cellsFromLines(kind: Kind, harness: string, label: string, names
   return names.map((name) => {
     const line = findLine(run.out, name);
     if (!line) {
-      return { kind, name, harness, state: "failed" as const, detail: t("notListed", { harness: label }) };
+      return { kind, name, harness, state: "failed" as const, detail: notListedDetail(label, run) };
     }
     const detail = detailFromLine(line, name);
     return { kind, name, harness, state: classifyLoad(detail), detail };
@@ -148,7 +155,7 @@ export function cellsFromHeaders(kind: Kind, harness: string, label: string, nam
   return names.map((name) => {
     const line = findSkillHeader(run.out, name);
     if (!line) {
-      return { kind, name, harness, state: "failed" as const, detail: t("notListed", { harness: label }) };
+      return { kind, name, harness, state: "failed" as const, detail: notListedDetail(label, run) };
     }
     const detail = detailFromLine(line, name);
     return { kind, name, harness, state: classifyLoad(detail), detail };
