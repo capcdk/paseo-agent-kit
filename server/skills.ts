@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, lstatSync, unlinkSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, lstatSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readJsonDoc } from "./mcp-config";
@@ -54,13 +54,38 @@ function linkTarget(path: string): string | null {
   }
 }
 
-/** Whether two skill folders carry byte-identical SKILL.md files. */
-function sameSkillFile(a: string, b: string): boolean {
+/** Whether two directory trees hold the same files with the same bytes (.DS_Store aside). */
+export function treesIdentical(a: string, b: string): boolean {
   try {
-    return readFileSync(join(a, "SKILL.md")).equals(readFileSync(join(b, "SKILL.md")));
+    const list = (dir: string) => readdirSync(dir).filter((entry) => entry !== ".DS_Store").sort();
+    const left = list(a);
+    const right = list(b);
+    if (left.length !== right.length || left.some((entry, index) => entry !== right[index])) {
+      return false;
+    }
+    return left.every((entry) => {
+      const x = join(a, entry);
+      const y = join(b, entry);
+      const dirX = lstatSync(x).isDirectory();
+      if (dirX !== lstatSync(y).isDirectory()) {
+        return false;
+      }
+      return dirX ? treesIdentical(x, y) : readFileSync(x).equals(readFileSync(y));
+    });
   } catch {
     return false;
   }
+}
+
+/** Copies Agent Kit replaced with links are parked here instead of being deleted. */
+export const REPLACED_SKILLS_ROOT = join(homedir(), ".paseo", "agent-kit", "replaced");
+
+/** Put a real directory aside (copy, then remove) so a link can take its place. */
+function parkReplacedCopy(name: string, dir: string): void {
+  const dest = join(REPLACED_SKILLS_ROOT, `${Date.now()}-${name}`);
+  mkdirSync(REPLACED_SKILLS_ROOT, { recursive: true });
+  cpSync(dir, dest, { recursive: true });
+  rmSync(dir, { recursive: true });
 }
 
 function placeLink(sourceDir: string, linkPath: string): void {
@@ -119,9 +144,14 @@ export function syncSkills(removedSources: readonly string[] = []): SkillSyncRes
       if (existsSync(linkPath) && !isManagedLink(linkPath) && linkTarget(linkPath) === realSource) {
         continue;
       }
-      // a real copy of this very skill is already there: the harness loads it, nothing to link
-      if (existsSync(linkPath) && !isManagedLink(linkPath) && sameSkillFile(linkPath, def.sourcePath)) {
-        continue;
+      // A byte-identical real copy is an uncontrolled duplicate: park it and link the managed source in its place.
+      if (existsSync(linkPath) && !isManagedLink(linkPath) && lstatSync(linkPath).isDirectory() && treesIdentical(linkPath, def.sourcePath)) {
+        try {
+          parkReplacedCopy(def.name, linkPath);
+        } catch (error) {
+          failed.push({ path: linkPath, error: error instanceof Error ? error.message : String(error) });
+          continue;
+        }
       }
       if (existsSync(linkPath) && !isManagedLink(linkPath)) {
         failed.push({ path: linkPath, error: t("linkOccupied") });

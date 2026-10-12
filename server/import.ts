@@ -5,7 +5,7 @@ import { harnesses, type HarnessDef } from "./harness";
 import { loadKitStore, saveKitStore } from "./kit-store";
 import { readJsonDoc, serversEqual } from "./mcp-config";
 import { canonicalSkillPath, isNpxOwned } from "./npx";
-import { listSkillsInRoot, readProjects } from "./skills";
+import { listSkillsInRoot, readProjects, treesIdentical } from "./skills";
 import { applySync } from "./sync";
 
 export interface ImportResult {
@@ -128,7 +128,16 @@ export function importFromHarnesses(): ImportResult {
           existing.sourcePath = canonicalReal;
         }
       }
-      if (realPath(existing.sourcePath) !== real) {
+      const existingReal = realPath(existing.sourcePath);
+      if (existingReal !== real && existingReal !== null && treesIdentical(existingReal, real)) {
+        // an identical copy in a harness directory: same skill, so bind it to where the copy lives
+        // (the next sync swaps the copy for a link)
+        if (projectId === null) {
+          existing.userLevel = true;
+        } else if (!existing.userLevel && !existing.projectIds.includes(projectId)) {
+          existing.projectIds.push(projectId);
+        }
+      } else if (existingReal !== real) {
         conflicts.add(`Skill ${name} (${existing.sourcePath} ≠ ${real})`);
       } else if (projectId !== null && !existing.userLevel && !existing.projectIds.includes(projectId)) {
         existing.projectIds.push(projectId);
