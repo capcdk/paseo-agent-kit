@@ -141,9 +141,8 @@ const en = {
   uninstallAction: "Uninstall",
   confirmUninstall: "Confirm uninstall",
   delistAction: "Remove from list",
-  confirmDelist: "Confirm remove",
+  cancelAction: "Cancel",
   deleteFilesAction: "Delete files",
-  confirmDeleteFiles: "Confirm delete files",
 
   // client: toasts
   mounted: "Mounted {name} on {project}",
@@ -275,9 +274,8 @@ const zh: Record<MessageKey, string> = {
   uninstallAction: "卸载",
   confirmUninstall: "确认卸载",
   delistAction: "从列表移除",
-  confirmDelist: "确认移除",
+  cancelAction: "取消",
   deleteFilesAction: "彻底删除文件",
-  confirmDeleteFiles: "确认彻底删除",
 
   mounted: "已挂载 {name} 到 {project}",
   unmounted: "已从 {project} 卸载 {name}",

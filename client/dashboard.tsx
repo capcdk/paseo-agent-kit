@@ -372,10 +372,10 @@ function ItemRow({
   onUpdate: () => void;
   onUninstall: (mode: "delist" | "delete") => void;
 }) {
-  const [armed, setArmed] = useState<"delist" | "delete" | null>(null);
+  const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!expanded) {
-      setArmed(null);
+      setArmed(false);
     }
   }, [expanded]);
   const states = harnesses.map((harness) => {
@@ -470,41 +470,33 @@ function ItemRow({
             <View style={{ gap: 6 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 {item.npxOwned ? <Button label={tr("updateAction")} icon="RefreshCw" theme={theme} disabled={busy} onPress={onUpdate} /> : null}
-                {localSkill ? (
-                  <>
-                    <Button
-                      label={tr(armed === "delist" ? "confirmDelist" : "delistAction")}
-                      theme={theme}
-                      disabled={busy}
-                      onPress={() => (armed === "delist" ? onUninstall("delist") : setArmed("delist"))}
-                    />
-                    <Button
-                      label={tr(armed === "delete" ? "confirmDeleteFiles" : "deleteFilesAction")}
-                      icon="Trash2"
-                      theme={theme}
-                      disabled={busy}
-                      onPress={() => (armed === "delete" ? onUninstall("delete") : setArmed("delete"))}
-                    />
-                  </>
-                ) : (
-                  <Button
-                    label={tr(armed ? "confirmUninstall" : "uninstallAction")}
-                    icon="Trash2"
-                    theme={theme}
-                    disabled={busy}
-                    onPress={() => (armed ? onUninstall("delete") : setArmed("delete"))}
-                  />
-                )}
+                <Button
+                  label={tr(localSkill ? (armed ? "cancelAction" : "uninstallAction") : armed ? "confirmUninstall" : "uninstallAction")}
+                  icon={localSkill && armed ? undefined : "Trash2"}
+                  theme={theme}
+                  disabled={busy}
+                  onPress={() => (armed && !localSkill ? onUninstall("delete") : setArmed(!armed))}
+                />
               </View>
-              {armed ? (
+              {armed && localSkill ? (
+                <View style={{ gap: 8 }}>
+                  <View style={{ gap: 3 }}>
+                    <View style={{ flexDirection: "row" }}>
+                      <Button label={tr("delistAction")} theme={theme} disabled={busy} onPress={() => onUninstall("delist")} />
+                    </View>
+                    <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{tr("delistHintSkill", { path: item.summary })}</Text>
+                  </View>
+                  <View style={{ gap: 3 }}>
+                    <View style={{ flexDirection: "row" }}>
+                      <Button label={tr("deleteFilesAction")} icon="Trash2" theme={theme} disabled={busy} onPress={() => onUninstall("delete")} />
+                    </View>
+                    <Text style={{ color: theme.colors.statusWarning, fontSize: 11 }}>{tr("uninstallHintSkillLocal", { path: item.summary })}</Text>
+                  </View>
+                </View>
+              ) : null}
+              {armed && !localSkill ? (
                 <Text style={{ color: theme.colors.statusWarning, fontSize: 11 }}>
-                  {kind === "mcp"
-                    ? tr("uninstallHintMcp")
-                    : item.npxOwned
-                      ? tr("uninstallHintSkillNpx")
-                      : armed === "delist"
-                        ? tr("delistHintSkill", { path: item.summary })
-                        : tr("uninstallHintSkillLocal", { path: item.summary })}
+                  {kind === "mcp" ? tr("uninstallHintMcp") : tr("uninstallHintSkillNpx")}
                 </Text>
               ) : null}
             </View>
