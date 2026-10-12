@@ -1,8 +1,8 @@
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { McpServer, ProbeCell } from "../shared/api";
 import { t } from "./locale";
+import { hasCommand } from "./installed";
 import { readJsonDoc, writeJsonDoc } from "./mcp-config";
 import { mcpFileCells, skillFileCells } from "./skill-probe";
 import { cellsFromBullets, cellsFromHeaders, cellsFromLines, runCli, type ProbeNames } from "./probe";
@@ -244,8 +244,8 @@ export interface HarnessDef {
   readonly skills: SkillSupport | null;
   /** load check run in a project directory; only harnesses with one get a dashboard column */
   readonly probe: ((rootPath: string, names: ProbeNames) => Promise<ProbeCell[]>) | null;
-  /** harnesses we only know from docs are left alone until their data directory exists; absent means always present */
-  readonly installed?: () => boolean;
+  /** the harness's command line tool; a harness whose tool is not installed is left out of every sync */
+  readonly cli: string;
 }
 
 async function cursorApprove(rootPath: string, name: string): Promise<void> {
@@ -358,6 +358,7 @@ export function harnesses(): readonly HarnessDef[] {
   const all: HarnessDef[] = [
     {
       id: "cursor",
+      cli: "agent",
       label: "Cursor",
       providerPattern: /^cursor/,
       mcp: {
@@ -379,6 +380,7 @@ export function harnesses(): readonly HarnessDef[] {
     },
     {
       id: "kiro",
+      cli: "kiro-cli",
       label: "Kiro",
       providerPattern: /^kiro/,
       mcp: {
@@ -399,6 +401,7 @@ export function harnesses(): readonly HarnessDef[] {
     },
     {
       id: "qoder",
+      cli: "qodercli",
       label: "Qoder",
       providerPattern: /^qoder/,
       mcp: {
@@ -428,6 +431,7 @@ export function harnesses(): readonly HarnessDef[] {
     },
     {
       id: "opencode",
+      cli: "opencode",
       label: "OpenCode",
       providerPattern: /^opencode/,
       mcp: opencodeMcp,
@@ -442,6 +446,7 @@ export function harnesses(): readonly HarnessDef[] {
     },
     {
       id: "omp",
+      cli: "omp",
       label: "Oh My Pi",
       providerPattern: /^omp/,
       mcp: ompMcp,
@@ -455,11 +460,11 @@ export function harnesses(): readonly HarnessDef[] {
     },
     {
       id: "claude",
+      cli: "claude",
       label: "Claude Code",
       providerPattern: /^claude/,
       mcp: claudeMcp,
       skills: claudeSkills,
-      installed: () => existsSync(join(home, ".claude")) || existsSync(join(home, ".claude.json")),
       async probe(rootPath, names) {
         const run = await runCli("claude", ["mcp", "list"], rootPath);
         return [
@@ -470,11 +475,11 @@ export function harnesses(): readonly HarnessDef[] {
     },
     {
       id: "kimi",
+      cli: "kimi",
       label: "Kimi Code",
       providerPattern: /^kimi/,
       mcp: kimiMcp,
       skills: kimiSkills,
-      installed: () => existsSync(kimiHome),
       async probe(rootPath, names) {
         return [
           ...mcpFileCells("kimi", "Kimi Code", kimiMcp, rootPath, names.mcp),
@@ -484,18 +489,18 @@ export function harnesses(): readonly HarnessDef[] {
     },
     {
       id: "minimax",
+      cli: "mcode",
       label: "MiniMax Code",
       providerPattern: null,
       mcp: minimaxMcp,
       // MiniMax Code's skill directories are not documented, so skills are not managed there yet
       skills: null,
-      installed: () => existsSync(minimaxHome),
       async probe(rootPath, names) {
         return mcpFileCells("minimax", "MiniMax Code", minimaxMcp, rootPath, names.mcp);
       },
     },
   ];
-  return all.filter((harness) => harness.installed?.() ?? true);
+  return all.filter((harness) => hasCommand(harness.cli));
 }
 
 export function findHarness(id: string): HarnessDef {

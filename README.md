@@ -33,7 +33,7 @@ The harnesses below are managed from their documentation (and, for Claude Code, 
 | Kimi Code | `~/.kimi-code/mcp.json` | `.kimi-code/mcp.json` | `~/.kimi-code/skills`, `~/.agents/skills` | `.kimi-code/skills`, `.agents/skills` | file check |
 | MiniMax Code | `~/.minimax/mcp.json` | not documented | not documented, so skills are not managed | n/a | file check (MCP only) |
 
-Kimi Code and MiniMax Code are only managed once their data directory (`~/.kimi-code`, `~/.minimax`, or `KIMI_CODE_HOME` / `MINIMAX_DATA_DIR`) exists, so Agent Kit never creates it for you.
+A harness is only managed when its command line tool is installed (`agent`, `kiro-cli`, `qodercli`, `opencode`, `omp`, `claude`, `kimi`, `mcode`), found on `PATH` or in the usual install directories such as `~/.local/bin`, `~/.bun/bin` and `~/.opencode/bin`. Without the tool, Agent Kit writes nothing for that harness and its column is hidden, so it never creates config directories for software you do not have.
 
 ### Load checks
 
