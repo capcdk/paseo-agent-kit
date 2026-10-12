@@ -148,7 +148,8 @@ export const skillUpsertRpc = defineRpc({
 
 export const skillDeleteRpc = defineRpc({
   name: "agent-kit.skill-delete",
-  input: z.object({ name: z.string() }),
+  /** delist: stop every harness loading it and drop it from the list, files stay. delete: also wipe the folder. */
+  input: z.object({ name: z.string(), mode: z.enum(["delist", "delete"]) }),
   output: z.object({ ok: z.literal(true) }),
 });
 

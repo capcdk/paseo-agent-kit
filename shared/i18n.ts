@@ -33,6 +33,7 @@ const en = {
   uninstallHintMcp: "Removes it from the list and from every harness config (user-level and each project's files).",
   uninstallHintSkillLocal: "Permanently deletes the skill folder from disk: {path}. This cannot be undone.",
   uninstallHintSkillNpx: "Runs npx skills remove and deletes the installed copy.",
+  delistHintSkill: "Removes it from the list and from every harness's skill directories. The folder {path} is kept (moved to ~/.paseo/agent-kit/skills if a harness scans its current location).",
   unknownHarness: "Unknown harness: {id}",
   alreadyGlobal: "{name} already loads globally; no per-project mount needed",
   cannotUnglobal: "{name} cannot stop loading globally: {reason}",
@@ -139,6 +140,10 @@ const en = {
   updateAction: "Update",
   uninstallAction: "Uninstall",
   confirmUninstall: "Confirm uninstall",
+  delistAction: "Remove from list",
+  confirmDelist: "Confirm remove",
+  deleteFilesAction: "Delete files",
+  confirmDeleteFiles: "Confirm delete files",
 
   // client: toasts
   mounted: "Mounted {name} on {project}",
@@ -148,6 +153,7 @@ const en = {
   trusted: "Trusted {name} in {harness} ({project})",
   updatedToast: "Updated {name}",
   uninstalledToast: "Uninstalled {name}",
+  delistedToast: "Removed {name} from the list; no harness loads it now",
 } as const;
 
 export type MessageKey = keyof typeof en;
@@ -169,6 +175,7 @@ const zh: Record<MessageKey, string> = {
   uninstallHintMcp: "将从列表中移除，并从所有 harness 配置中删除（用户级及各项目文件）。",
   uninstallHintSkillLocal: "将从磁盘永久删除 Skill 目录：{path}，无法恢复。",
   uninstallHintSkillNpx: "将执行 npx skills remove，删除已安装的副本。",
+  delistHintSkill: "将从列表中移除，并从所有 harness 的 Skill 目录中撤掉。源目录 {path} 会保留（若其当前位置会被 harness 自动扫描，则移到 ~/.paseo/agent-kit/skills）。",
   unknownHarness: "未知 harness：{id}",
   alreadyGlobal: "{name} 已全局加载，无需按项目挂载",
   cannotUnglobal: "{name} 无法取消全局：{reason}",
@@ -267,6 +274,10 @@ const zh: Record<MessageKey, string> = {
   updateAction: "更新",
   uninstallAction: "卸载",
   confirmUninstall: "确认卸载",
+  delistAction: "从列表移除",
+  confirmDelist: "确认移除",
+  deleteFilesAction: "彻底删除文件",
+  confirmDeleteFiles: "确认彻底删除",
 
   mounted: "已挂载 {name} 到 {project}",
   unmounted: "已从 {project} 卸载 {name}",
@@ -275,6 +286,7 @@ const zh: Record<MessageKey, string> = {
   trusted: "已在 {harness} 信任 {name}（{project}）",
   updatedToast: "{name} 已更新",
   uninstalledToast: "已卸载 {name}",
+  delistedToast: "已将 {name} 从列表移除，各 harness 不再加载",
 };
 
 const MESSAGES: Record<Locale, Record<MessageKey, string>> = { en, zh };

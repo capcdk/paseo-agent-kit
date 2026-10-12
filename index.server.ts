@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   kitStatusRpc,
@@ -33,7 +34,7 @@ import {
   setUserLevel,
   throwIfFailed,
 } from "./server/mount";
-import { deleteSkillSource, readProjects, skillDeleteBlocker, syncSkills } from "./server/skills";
+import { deleteSkillSource, detachSkillSource, detachTarget, readProjects, skillDeleteBlocker, syncSkills } from "./server/skills";
 
 function projectForCwd(cwd: string): string | null {
   let best: { projectId: string; length: number } | null = null;
@@ -161,22 +162,26 @@ export default function contribute(server: PluginServerContext) {
 
   // Uninstall order matters: sweep our links while the entity is still on disk,
   // then let the CLI remove its own canonical copy and lock entry.
-  server.handle(skillDeleteRpc, async ({ name }) => {
+  server.handle(skillDeleteRpc, async ({ name, mode }) => {
     const store = loadKitStore();
     const removed = [...new Set(store.skills.filter((entry) => entry.name === name).map((entry) => entry.sourcePath))];
     if (removed.length === 0) {
       throw new Error(t("unknownSkill", { name }));
     }
     const npxOwned = isNpxOwned(name);
-    // Local folders are deleted for real, so every safety check runs before anything changes.
+    // Local folders are touched on disk, so every check runs before anything changes.
     if (!npxOwned) {
       if (name === "paseo" || name.startsWith("paseo-")) {
         throw new Error(t("paseoBundledNoDelete", { name }));
       }
       for (const path of removed) {
-        const blocker = skillDeleteBlocker(path);
+        const blocker = mode === "delete" ? skillDeleteBlocker(path) : null;
         if (blocker) {
           throw new Error(t("deleteBlocked", { path, reason: blocker }));
+        }
+        const target = mode === "delist" ? detachTarget(name, path) : null;
+        if (target !== null && existsSync(target)) {
+          throw new Error(t("relocateTargetExists", { path: target }));
         }
       }
     }
@@ -189,7 +194,11 @@ export default function contribute(server: PluginServerContext) {
       }
     } else {
       for (const path of removed) {
-        deleteSkillSource(path);
+        if (mode === "delete") {
+          deleteSkillSource(path);
+        } else {
+          detachSkillSource(name, path);
+        }
       }
     }
     return { ok: true } as const;

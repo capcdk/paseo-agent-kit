@@ -236,6 +236,46 @@ export function skillDeleteBlocker(sourcePath: string): string | null {
   return null;
 }
 
+/** Whether the source sits in a directory some harness scans by itself (user level or any project). */
+function inScannedRoot(source: string): boolean {
+  const roots = [...autoScannedUserSkillRoots(), ...readProjects().flatMap((project) => projectSkillRoots(project.rootPath))];
+  return roots.some((root) => isInside(source, root));
+}
+
+/** Where detachSkillSource would move the folder, or null when the folder stays where it is. */
+export function detachTarget(name: string, sourcePath: string): string | null {
+  const source = sourcePath.replace(/\/+$/, "");
+  if (!existsSync(source) || isManagedLink(source) || !inScannedRoot(source)) {
+    return null;
+  }
+  return join(MANAGED_SKILLS_ROOT, name);
+}
+
+/**
+ * Stop harnesses from loading a skill without deleting its files. A folder sitting
+ * in a directory harnesses scan on their own is moved to MANAGED_SKILLS_ROOT (else it
+ * would keep loading, and Re-scan would import it again); a symlink there is just
+ * unlinked; a folder elsewhere is left alone. Callers sweep our own links separately.
+ */
+export function detachSkillSource(name: string, sourcePath: string): void {
+  const source = sourcePath.replace(/\/+$/, "");
+  if (isManagedLink(source)) {
+    if (inScannedRoot(source)) {
+      unlinkSync(source);
+    }
+    return;
+  }
+  const target = detachTarget(name, source);
+  if (target === null) {
+    return;
+  }
+  if (existsSync(target)) {
+    throw new Error(t("relocateTargetExists", { path: target }));
+  }
+  mkdirSync(MANAGED_SKILLS_ROOT, { recursive: true });
+  renameSync(source, target);
+}
+
 /** Remove a skill's folder (or just the link when the source is a symlink). Callers check skillDeleteBlocker first. */
 export function deleteSkillSource(sourcePath: string): void {
   const source = sourcePath.replace(/\/+$/, "");

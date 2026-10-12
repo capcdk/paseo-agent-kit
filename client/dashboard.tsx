@@ -370,12 +370,12 @@ function ItemRow({
   onUserLevel: (userLevel: boolean) => void;
   onTrust: (harness: HarnessColumn) => void;
   onUpdate: () => void;
-  onUninstall: () => void;
+  onUninstall: (mode: "delist" | "delete") => void;
 }) {
-  const [armed, setArmed] = useState(false);
+  const [armed, setArmed] = useState<"delist" | "delete" | null>(null);
   useEffect(() => {
     if (!expanded) {
-      setArmed(false);
+      setArmed(null);
     }
   }, [expanded]);
   const states = harnesses.map((harness) => {
@@ -385,6 +385,7 @@ function ItemRow({
   });
   const global = item.userLevel;
   // Paseo's bundled skills are restored by Paseo, so they have nothing to uninstall here.
+  const localSkill = kind === "skill" && !item.npxOwned;
   const canUninstall = kind === "mcp" || item.npxOwned || item.globalLock === null;
   const blind = kind === "skill" && !item.userLevel ? harnesses.filter((harness) => !harness.projectSkills) : [];
   const needsTrust = states.filter(({ harness, state }) => harness.canApprove && state === "approval").map(({ harness }) => harness);
@@ -469,13 +470,31 @@ function ItemRow({
             <View style={{ gap: 6 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 {item.npxOwned ? <Button label={tr("updateAction")} icon="RefreshCw" theme={theme} disabled={busy} onPress={onUpdate} /> : null}
-                <Button
-                  label={tr(armed ? "confirmUninstall" : "uninstallAction")}
-                  icon="Trash2"
-                  theme={theme}
-                  disabled={busy}
-                  onPress={() => (armed ? onUninstall() : setArmed(true))}
-                />
+                {localSkill ? (
+                  <>
+                    <Button
+                      label={tr(armed === "delist" ? "confirmDelist" : "delistAction")}
+                      theme={theme}
+                      disabled={busy}
+                      onPress={() => (armed === "delist" ? onUninstall("delist") : setArmed("delist"))}
+                    />
+                    <Button
+                      label={tr(armed === "delete" ? "confirmDeleteFiles" : "deleteFilesAction")}
+                      icon="Trash2"
+                      theme={theme}
+                      disabled={busy}
+                      onPress={() => (armed === "delete" ? onUninstall("delete") : setArmed("delete"))}
+                    />
+                  </>
+                ) : (
+                  <Button
+                    label={tr(armed ? "confirmUninstall" : "uninstallAction")}
+                    icon="Trash2"
+                    theme={theme}
+                    disabled={busy}
+                    onPress={() => (armed ? onUninstall("delete") : setArmed("delete"))}
+                  />
+                )}
               </View>
               {armed ? (
                 <Text style={{ color: theme.colors.statusWarning, fontSize: 11 }}>
@@ -483,7 +502,9 @@ function ItemRow({
                     ? tr("uninstallHintMcp")
                     : item.npxOwned
                       ? tr("uninstallHintSkillNpx")
-                      : tr("uninstallHintSkillLocal", { path: item.summary })}
+                      : armed === "delist"
+                        ? tr("delistHintSkill", { path: item.summary })
+                        : tr("uninstallHintSkillLocal", { path: item.summary })}
                 </Text>
               ) : null}
             </View>
@@ -1099,10 +1120,10 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
                             () => tr("updatedToast", { name: item.name }),
                           )
                         }
-                        onUninstall={() =>
+                        onUninstall={(mode) =>
                           void run(
-                            () => (kind === "mcp" ? requestDeleteServer({ name: item.name }) : requestDelete({ name: item.name })),
-                            () => tr("uninstalledToast", { name: item.name }),
+                            () => (kind === "mcp" ? requestDeleteServer({ name: item.name }) : requestDelete({ name: item.name, mode })),
+                            () => tr(mode === "delist" ? "delistedToast" : "uninstalledToast", { name: item.name }),
                           )
                         }
                       />
