@@ -177,3 +177,45 @@ export function applySync(scope: SyncScope, projectId: string | null): SyncResul
   }
   return { applied: true, changes, failed };
 }
+
+/**
+ * Uninstall: drop `name` from every harness config (user files and the project
+ * files of every known project) whether or not Agent Kit wrote it, so a later
+ * Re-scan cannot resurrect it. Only that one entry is touched; its ownership
+ * record goes too.
+ */
+export function purgeMcpServer(name: string): { removedFrom: string[]; failed: { path: string; error: string }[] } {
+  const removedFrom: string[] = [];
+  const failed: { path: string; error: string }[] = [];
+  const targets: { harness: HarnessDef; path: string }[] = [];
+  for (const harness of harnesses()) {
+    targets.push({ harness, path: harness.mcp.userPath });
+    for (const project of readProjects()) {
+      const path = harness.mcp.projectPath?.(project.rootPath);
+      if (path) {
+        targets.push({ harness, path });
+      }
+    }
+  }
+  for (const { harness, path } of targets) {
+    if (!existsSync(path)) {
+      continue;
+    }
+    try {
+      const doc = readJsonDoc(path).doc;
+      if (!(name in harness.mcp.format.read(doc))) {
+        continue;
+      }
+      writeJsonDoc(path, harness.mcp.format.write(doc, {}, new Set([name])));
+      removedFrom.push(path);
+    } catch (error) {
+      failed.push({ path, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  const ownership = loadOwnership();
+  for (const key of Object.keys(ownership.owned)) {
+    ownership.owned[key] = ownership.owned[key].filter((entry) => entry !== name);
+  }
+  saveOwnership(ownership);
+  return { removedFrom, failed };
+}

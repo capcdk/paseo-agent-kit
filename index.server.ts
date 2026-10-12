@@ -18,7 +18,7 @@ import {
   userLevelRpc,
 } from "./shared/api";
 import { buildKitStatus, probeProject } from "./server/status";
-import { applySync, planSync } from "./server/sync";
+import { applySync, planSync, purgeMcpServer } from "./server/sync";
 import { loadKitStore, saveKitStore } from "./server/kit-store";
 import { importFromHarnesses } from "./server/import";
 import { harnesses } from "./server/harness";
@@ -33,7 +33,7 @@ import {
   setUserLevel,
   throwIfFailed,
 } from "./server/mount";
-import { readProjects, syncSkills } from "./server/skills";
+import { deleteSkillSource, readProjects, skillDeleteBlocker, syncSkills } from "./server/skills";
 
 function projectForCwd(cwd: string): string | null {
   let best: { projectId: string; length: number } | null = null;
@@ -139,10 +139,14 @@ export default function contribute(server: PluginServerContext) {
     return { ok: true } as const;
   });
 
+  // Uninstall: out of the catalog, then out of every harness config (owned or not).
   server.handle(serverDeleteRpc, async ({ name }) => {
     const store = loadKitStore();
+    if (!store.servers.some((entry) => entry.name === name)) {
+      throw new Error(t("unknownServer", { name }));
+    }
     saveKitStore({ ...store, servers: store.servers.filter((entry) => entry.name !== name) });
-    void applySync("all", null);
+    throwIfFailed(purgeMcpServer(name).failed);
     return { ok: true } as const;
   });
 
@@ -159,16 +163,33 @@ export default function contribute(server: PluginServerContext) {
   // then let the CLI remove its own canonical copy and lock entry.
   server.handle(skillDeleteRpc, async ({ name }) => {
     const store = loadKitStore();
-    const removed = store.skills.filter((entry) => entry.name === name).map((entry) => entry.sourcePath);
+    const removed = [...new Set(store.skills.filter((entry) => entry.name === name).map((entry) => entry.sourcePath))];
     if (removed.length === 0) {
       throw new Error(t("unknownSkill", { name }));
     }
+    const npxOwned = isNpxOwned(name);
+    // Local folders are deleted for real, so every safety check runs before anything changes.
+    if (!npxOwned) {
+      if (name === "paseo" || name.startsWith("paseo-")) {
+        throw new Error(t("paseoBundledNoDelete", { name }));
+      }
+      for (const path of removed) {
+        const blocker = skillDeleteBlocker(path);
+        if (blocker) {
+          throw new Error(t("deleteBlocked", { path, reason: blocker }));
+        }
+      }
+    }
     saveKitStore({ ...store, skills: store.skills.filter((entry) => entry.name !== name) });
     throwIfFailed(syncSkills(removed).failed);
-    if (isNpxOwned(name)) {
+    if (npxOwned) {
       const run = await npxRemove(name);
       if (run.code !== 0) {
         throw new Error(t("npxCommandFailed", { detail: npxOutputTail(run) }));
+      }
+    } else {
+      for (const path of removed) {
+        deleteSkillSource(path);
       }
     }
     return { ok: true } as const;

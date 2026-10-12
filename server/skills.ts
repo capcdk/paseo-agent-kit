@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, symlinkSync, lstatSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, lstatSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readJsonDoc } from "./mcp-config";
@@ -200,6 +200,52 @@ export function relocateSkillSource(name: string, sourcePath: string): string {
   mkdirSync(MANAGED_SKILLS_ROOT, { recursive: true });
   renameSync(source, target);
   return target;
+}
+
+/**
+ * Whether a skill folder may be wiped from disk. The folder must look like a
+ * skill (SKILL.md), and must not be something much bigger that merely contains
+ * one: a git repository root, a skill root, a project, or a shallow path.
+ * Returns the reason it is unsafe, or null.
+ */
+export function skillDeleteBlocker(sourcePath: string): string | null {
+  const source = sourcePath.replace(/\/+$/, "");
+  if (!existsSync(source)) {
+    return null;
+  }
+  if (isManagedLink(source)) {
+    return null;
+  }
+  if (!lstatSync(source).isDirectory() || !existsSync(join(source, "SKILL.md"))) {
+    return t("deleteBlockNotSkill");
+  }
+  if (source.split("/").filter(Boolean).length < 3 || source === homedir()) {
+    return t("deleteBlockShallow");
+  }
+  if (existsSync(join(source, ".git"))) {
+    return t("deleteBlockRepo");
+  }
+  const projects = readProjects();
+  const roots = [...autoScannedUserSkillRoots(), MANAGED_SKILLS_ROOT, ...projects.flatMap((project) => projectSkillRoots(project.rootPath))];
+  if (roots.some((root) => isInside(root, source))) {
+    return t("deleteBlockRoot");
+  }
+  if (projects.some((project) => isInside(project.rootPath, source))) {
+    return t("deleteBlockProject");
+  }
+  return null;
+}
+
+/** Remove a skill's folder (or just the link when the source is a symlink). Callers check skillDeleteBlocker first. */
+export function deleteSkillSource(sourcePath: string): void {
+  const source = sourcePath.replace(/\/+$/, "");
+  if (isManagedLink(source)) {
+    unlinkSync(source);
+    return;
+  }
+  if (existsSync(source)) {
+    rmSync(source, { recursive: true });
+  }
 }
 
 /** YAML allows quoted names (`name: "foo"`); the quotes must not leak into paths. */

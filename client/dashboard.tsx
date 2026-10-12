@@ -9,6 +9,7 @@ import {
   localeRpc,
   mountRpc,
   probeRpc,
+  serverDeleteRpc,
   skillDeleteRpc,
   skillDiscoverRpc,
   skillInstallRpc,
@@ -383,6 +384,8 @@ function ItemRow({
     return { harness, state, detail: cell?.detail ?? (probe?.status === "error" ? probe.message : "") };
   });
   const global = item.userLevel;
+  // Paseo's bundled skills are restored by Paseo, so they have nothing to uninstall here.
+  const canUninstall = kind === "mcp" || item.npxOwned || item.globalLock === null;
   const blind = kind === "skill" && !item.userLevel ? harnesses.filter((harness) => !harness.projectSkills) : [];
   const needsTrust = states.filter(({ harness, state }) => harness.canApprove && state === "approval").map(({ harness }) => harness);
   const badges = (
@@ -462,16 +465,27 @@ function ItemRow({
       </View>
       {expanded ? (
         <View style={{ paddingLeft: 34, paddingRight: 14, paddingBottom: 12, gap: 6 }}>
-          {item.npxOwned ? (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Button label={tr("updateAction")} icon="RefreshCw" theme={theme} disabled={busy} onPress={onUpdate} />
-              <Button
-                label={tr(armed ? "confirmUninstall" : "uninstallAction")}
-                icon="Trash2"
-                theme={theme}
-                disabled={busy}
-                onPress={() => (armed ? onUninstall() : setArmed(true))}
-              />
+          {canUninstall ? (
+            <View style={{ gap: 6 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                {item.npxOwned ? <Button label={tr("updateAction")} icon="RefreshCw" theme={theme} disabled={busy} onPress={onUpdate} /> : null}
+                <Button
+                  label={tr(armed ? "confirmUninstall" : "uninstallAction")}
+                  icon="Trash2"
+                  theme={theme}
+                  disabled={busy}
+                  onPress={() => (armed ? onUninstall() : setArmed(true))}
+                />
+              </View>
+              {armed ? (
+                <Text style={{ color: theme.colors.statusWarning, fontSize: 11 }}>
+                  {kind === "mcp"
+                    ? tr("uninstallHintMcp")
+                    : item.npxOwned
+                      ? tr("uninstallHintSkillNpx")
+                      : tr("uninstallHintSkillLocal", { path: item.summary })}
+                </Text>
+              ) : null}
             </View>
           ) : null}
           {states.map(({ harness, state, detail }) => (
@@ -537,6 +551,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
   const requestTrust = useRpc(trustRpc);
   const requestLocale = useRpc(localeRpc);
   const requestDelete = useRpc(skillDeleteRpc);
+  const requestDeleteServer = useRpc(serverDeleteRpc);
   const requestUpdate = useRpc(skillUpdateRpc);
   const requestInstall = useRpc(skillInstallRpc);
   const requestDiscover = useRpc(skillDiscoverRpc);
@@ -1086,7 +1101,7 @@ export function AgentKitScreen({ theme, layout }: PluginSurfaceProps) {
                         }
                         onUninstall={() =>
                           void run(
-                            () => requestDelete({ name: item.name }),
+                            () => (kind === "mcp" ? requestDeleteServer({ name: item.name }) : requestDelete({ name: item.name })),
                             () => tr("uninstalledToast", { name: item.name }),
                           )
                         }
