@@ -166,18 +166,27 @@ export function syncSkills(removedSources: readonly string[] = []): SkillSyncRes
     }
   }
 
-  const sweepRoots = [...userLinkRoots(), ...projects.flatMap((project) => projectLinkRoots(project.rootPath))];
+  // Roots harnesses scan on their own (e.g. ~/.claude/skills) are not ours to fill, but a link there
+  // to a skill that is not global would make it load everywhere, so those links go too.
+  const globalSources = new Set(store.skills.filter((def) => def.enabled && def.userLevel).map((def) => def.sourcePath));
+  const linkRoots = new Set([...userLinkRoots(), ...projects.flatMap((project) => projectLinkRoots(project.rootPath))]);
+  const sweepRoots = [...linkRoots, ...autoScannedUserSkillRoots().filter((root) => !linkRoots.has(root))];
   for (const base of sweepRoots) {
     if (!existsSync(base)) {
       continue;
     }
+    const scanOnly = !linkRoots.has(base);
     for (const name of readdirSync(base)) {
       const linkPath = join(base, name);
       if (!isManagedLink(linkPath) || desiredLinks.includes(linkPath)) {
         continue;
       }
       const target = linkTarget(linkPath);
-      if (target === null || ![...sourcePaths].some((source) => target === source || target.startsWith(`${source}/`))) {
+      const matches = (source: string) => target === source || (target?.startsWith(`${source}/`) ?? false);
+      if (target === null || ![...sourcePaths].some(matches)) {
+        continue;
+      }
+      if (scanOnly && [...globalSources].some(matches)) {
         continue;
       }
       try {

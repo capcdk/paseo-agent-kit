@@ -2,7 +2,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { McpServer, ProbeCell } from "../shared/api";
 import { t } from "./locale";
-import { cellsFromBullets, cellsFromHeaders, cellsFromLines, runCli, staticCells, type ProbeNames } from "./probe";
+import { skillFileCells } from "./skill-probe";
+import { cellsFromBullets, cellsFromHeaders, cellsFromLines, runCli, type ProbeNames } from "./probe";
 
 export type ServerMap = Record<string, McpServer>;
 
@@ -215,6 +216,20 @@ async function cursorApprove(rootPath: string, name: string): Promise<void> {
 
 export function harnesses(): readonly HarnessDef[] {
   const home = homedir();
+  const cursorSkills: SkillSupport = {
+      userLink: join(home, ".cursor", "skills"),
+      userScan: [join(home, ".cursor", "skills"), join(home, ".agents", "skills"), join(home, ".claude", "skills")],
+      projectLink: (dir) => join(dir, ".cursor", "skills"),
+      projectScan: (dir) => [join(dir, ".cursor", "skills")],
+      projectLoaded: false,
+    };
+  const kiroSkills: SkillSupport = {
+      userLink: join(home, ".kiro", "skills"),
+      userScan: [join(home, ".kiro", "skills")],
+      projectLink: (dir) => join(dir, ".kiro", "skills"),
+      projectScan: (dir) => [join(dir, ".kiro", "skills")],
+      projectLoaded: true,
+    };
   return [
     {
       id: "cursor",
@@ -228,18 +243,12 @@ export function harnesses(): readonly HarnessDef[] {
         projectLoaded: false,
         approveProject: cursorApprove,
       },
-      skills: {
-        userLink: join(home, ".cursor", "skills"),
-        userScan: [join(home, ".cursor", "skills"), join(home, ".agents", "skills"), join(home, ".claude", "skills")],
-        projectLink: (dir) => join(dir, ".cursor", "skills"),
-        projectScan: (dir) => [join(dir, ".cursor", "skills")],
-        projectLoaded: false,
-      },
+      skills: cursorSkills,
       async probe(rootPath, names) {
         const run = await runCli("agent", ["mcp", "list"], rootPath);
         return [
           ...cellsFromLines("mcp", "cursor", "Cursor", names.mcp, run),
-          ...staticCells("skill", "cursor", names.skills, t("skillNotReported", { harness: "Cursor" }), "unknown"),
+          ...skillFileCells("cursor", "Cursor", cursorSkills, rootPath, names.skills),
         ];
       },
     },
@@ -254,18 +263,12 @@ export function harnesses(): readonly HarnessDef[] {
         projectLoaded: true,
         approveProject: null,
       },
-      skills: {
-        userLink: join(home, ".kiro", "skills"),
-        userScan: [join(home, ".kiro", "skills")],
-        projectLink: (dir) => join(dir, ".kiro", "skills"),
-        projectScan: (dir) => [join(dir, ".kiro", "skills")],
-        projectLoaded: true,
-      },
+      skills: kiroSkills,
       async probe(rootPath, names) {
         const run = await runCli("kiro-cli", ["mcp", "list", "default"], rootPath);
         return [
           ...cellsFromBullets("mcp", "kiro", names.mcp, run),
-          ...staticCells("skill", "kiro", names.skills, t("skillNotReported", { harness: "Kiro" }), "unknown"),
+          ...skillFileCells("kiro", "Kiro", kiroSkills, rootPath, names.skills),
         ];
       },
     },
