@@ -1,8 +1,10 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { McpServer, ProbeCell } from "../shared/api";
 import { t } from "./locale";
-import { skillFileCells } from "./skill-probe";
+import { readJsonDoc, writeJsonDoc } from "./mcp-config";
+import { mcpFileCells, skillFileCells } from "./skill-probe";
 import { cellsFromBullets, cellsFromHeaders, cellsFromLines, runCli, type ProbeNames } from "./probe";
 
 export type ServerMap = Record<string, McpServer>;
@@ -98,6 +100,42 @@ export const plainFormat: ConfigFormat = {
     const base = cloneDoc(doc);
     mergeKey(base, "mcpServers", desired, owned);
     return base;
+  },
+};
+
+/** Plain `mcpServers` file whose schema insists on an explicit transport for URL servers. */
+function typedRemoteFormat(remoteType: string): ConfigFormat {
+  return {
+    read: plainFormat.read,
+    write(doc, desired, owned) {
+      const typed: ServerMap = {};
+      for (const [name, server] of Object.entries(desired)) {
+        typed[name] = server.type ? server : { ...server, type: server.command ? "stdio" : remoteType };
+      }
+      return plainFormat.write(doc, typed, owned);
+    },
+  };
+}
+
+/** Kimi Code: no `type` key; HTTP is implied by `url`, legacy SSE is `transport: "sse"`. */
+const kimiFormat: ConfigFormat = {
+  read(doc) {
+    const out = plainFormat.read(doc);
+    const raw = isRecord(doc) && isRecord(doc.mcpServers) ? doc.mcpServers : {};
+    for (const [name, value] of Object.entries(raw)) {
+      if (isRecord(value) && value.transport === "sse" && out[name]) {
+        out[name] = { ...out[name], type: "sse" };
+      }
+    }
+    return out;
+  },
+  write(doc, desired, owned) {
+    const mapped: Record<string, Record<string, unknown>> = {};
+    for (const [name, server] of Object.entries(desired)) {
+      const { type, ...rest } = server;
+      mapped[name] = type === "sse" ? { ...rest, transport: "sse" } : rest;
+    }
+    return plainFormat.write(doc, mapped as ServerMap, owned);
   },
 };
 
@@ -203,6 +241,8 @@ export interface HarnessDef {
   readonly skills: SkillSupport | null;
   /** load check run in a project directory; only harnesses with one get a dashboard column */
   readonly probe: ((rootPath: string, names: ProbeNames) => Promise<ProbeCell[]>) | null;
+  /** harnesses we only know from docs are left alone until their data directory exists; absent means always present */
+  readonly installed?: () => boolean;
 }
 
 async function cursorApprove(rootPath: string, name: string): Promise<void> {
@@ -212,6 +252,22 @@ async function cursorApprove(rootPath: string, name: string): Promise<void> {
       t("approveFailed", { harness: "Cursor", name, detail: run.out.trim().slice(-180) || t("exitCode", { code: String(run.code) }) }),
     );
   }
+}
+
+/**
+ * Claude Code asks before using servers from a project .mcp.json. Approving one
+ * means listing it in `enabledMcpjsonServers` of the project's settings.local.json.
+ */
+async function claudeApprove(rootPath: string, name: string): Promise<void> {
+  const path = join(rootPath, ".claude", "settings.local.json");
+  const { doc } = readJsonDoc(path);
+  const base = isRecord(doc) ? { ...doc } : {};
+  const current = Array.isArray(base.enabledMcpjsonServers) ? base.enabledMcpjsonServers.filter((entry): entry is string => typeof entry === "string") : [];
+  if (current.includes(name)) {
+    return;
+  }
+  base.enabledMcpjsonServers = [...current, name];
+  writeJsonDoc(path, base);
 }
 
 export function harnesses(): readonly HarnessDef[] {
@@ -230,7 +286,73 @@ export function harnesses(): readonly HarnessDef[] {
       projectScan: (dir) => [join(dir, ".kiro", "skills")],
       projectLoaded: true,
     };
-  return [
+  const claudeSkills: SkillSupport = {
+    userLink: join(home, ".claude", "skills"),
+    userScan: [join(home, ".claude", "skills")],
+    projectLink: (dir) => join(dir, ".claude", "skills"),
+    projectScan: (dir) => [join(dir, ".claude", "skills")],
+    projectLoaded: true,
+  };
+  const opencodeSkills: SkillSupport = {
+    userLink: join(home, ".config", "opencode", "skills"),
+    userScan: [join(home, ".config", "opencode", "skills"), join(home, ".claude", "skills"), join(home, ".agents", "skills")],
+    projectLink: (dir) => join(dir, ".opencode", "skills"),
+    projectScan: (dir) => [join(dir, ".opencode", "skills"), join(dir, ".claude", "skills"), join(dir, ".agents", "skills")],
+    projectLoaded: true,
+  };
+  // omp reads ~/.claude and ~/.agents at user level only when the provider is opted in, so only its own root counts there
+  const ompSkills: SkillSupport = {
+    userLink: join(home, ".omp", "agent", "skills"),
+    userScan: [join(home, ".omp", "agent", "skills")],
+    projectLink: (dir) => join(dir, ".omp", "skills"),
+    projectScan: (dir) => [join(dir, ".omp", "skills"), join(dir, ".agents", "skills"), join(dir, ".claude", "skills")],
+    projectLoaded: true,
+  };
+  const kimiHome = process.env.KIMI_CODE_HOME || join(home, ".kimi-code");
+  const kimiSkills: SkillSupport = {
+    userLink: join(kimiHome, "skills"),
+    userScan: [join(kimiHome, "skills"), join(home, ".agents", "skills")],
+    projectLink: (dir) => join(dir, ".kimi-code", "skills"),
+    projectScan: (dir) => [join(dir, ".kimi-code", "skills"), join(dir, ".agents", "skills")],
+    projectLoaded: true,
+  };
+  const minimaxHome = process.env.MINIMAX_DATA_DIR || join(home, ".minimax");
+  const claudeMcp: McpSupport = {
+    format: typedRemoteFormat("http"),
+    userPath: join(home, ".claude.json"),
+    projectPath: (dir) => join(dir, ".mcp.json"),
+    projectLoaded: true,
+    approveProject: claudeApprove,
+  };
+  const opencodeMcp: McpSupport = {
+    format: opencodeFormat,
+    userPath: join(home, ".config", "opencode", "opencode.json"),
+    projectPath: (dir) => join(dir, "opencode.json"),
+    projectLoaded: true,
+    approveProject: null,
+  };
+  const ompMcp: McpSupport = {
+    format: plainFormat,
+    userPath: join(home, ".omp", "agent", "mcp.json"),
+    projectPath: (dir) => join(dir, ".omp", "mcp.json"),
+    projectLoaded: true,
+    approveProject: null,
+  };
+  const kimiMcp: McpSupport = {
+    format: kimiFormat,
+    userPath: join(kimiHome, "mcp.json"),
+    projectPath: (dir) => join(dir, ".kimi-code", "mcp.json"),
+    projectLoaded: true,
+    approveProject: null,
+  };
+  const minimaxMcp: McpSupport = {
+    format: typedRemoteFormat("streamable-http"),
+    userPath: join(minimaxHome, "mcp.json"),
+    projectPath: null,
+    projectLoaded: true,
+    approveProject: null,
+  };
+  const all: HarnessDef[] = [
     {
       id: "cursor",
       label: "Cursor",
@@ -304,32 +426,73 @@ export function harnesses(): readonly HarnessDef[] {
     {
       id: "opencode",
       label: "OpenCode",
-      providerPattern: null,
-      mcp: {
-        format: opencodeFormat,
-        userPath: join(home, ".config", "opencode", "opencode.json"),
-        projectPath: null,
-        projectLoaded: true,
-        approveProject: null,
+      providerPattern: /^opencode/,
+      mcp: opencodeMcp,
+      skills: opencodeSkills,
+      async probe(rootPath, names) {
+        const run = await runCli("opencode", ["mcp", "list"], rootPath);
+        return [
+          ...cellsFromLines("mcp", "opencode", "OpenCode", names.mcp, run),
+          ...skillFileCells("opencode", "OpenCode", opencodeSkills, rootPath, names.skills),
+        ];
       },
-      skills: null,
-      probe: null,
     },
     {
       id: "omp",
       label: "Oh My Pi",
-      providerPattern: null,
-      mcp: {
-        format: plainFormat,
-        userPath: join(home, ".omp", "agent", "mcp.json"),
-        projectPath: null,
-        projectLoaded: true,
-        approveProject: null,
+      providerPattern: /^omp/,
+      mcp: ompMcp,
+      skills: ompSkills,
+      async probe(rootPath, names) {
+        return [
+          ...mcpFileCells("omp", "Oh My Pi", ompMcp, rootPath, names.mcp),
+          ...skillFileCells("omp", "Oh My Pi", ompSkills, rootPath, names.skills),
+        ];
       },
+    },
+    {
+      id: "claude",
+      label: "Claude Code",
+      providerPattern: /^claude/,
+      mcp: claudeMcp,
+      skills: claudeSkills,
+      installed: () => existsSync(join(home, ".claude")) || existsSync(join(home, ".claude.json")),
+      async probe(rootPath, names) {
+        const run = await runCli("claude", ["mcp", "list"], rootPath);
+        return [
+          ...cellsFromLines("mcp", "claude", "Claude Code", names.mcp, run),
+          ...skillFileCells("claude", "Claude Code", claudeSkills, rootPath, names.skills),
+        ];
+      },
+    },
+    {
+      id: "kimi",
+      label: "Kimi Code",
+      providerPattern: /^kimi/,
+      mcp: kimiMcp,
+      skills: kimiSkills,
+      installed: () => existsSync(kimiHome),
+      async probe(rootPath, names) {
+        return [
+          ...mcpFileCells("kimi", "Kimi Code", kimiMcp, rootPath, names.mcp),
+          ...skillFileCells("kimi", "Kimi Code", kimiSkills, rootPath, names.skills),
+        ];
+      },
+    },
+    {
+      id: "minimax",
+      label: "MiniMax Code",
+      providerPattern: null,
+      mcp: minimaxMcp,
+      // MiniMax Code's skill directories are not documented, so skills are not managed there yet
       skills: null,
-      probe: null,
+      installed: () => existsSync(minimaxHome),
+      async probe(rootPath, names) {
+        return mcpFileCells("minimax", "MiniMax Code", minimaxMcp, rootPath, names.mcp);
+      },
     },
   ];
+  return all.filter((harness) => harness.installed?.() ?? true);
 }
 
 export function findHarness(id: string): HarnessDef {

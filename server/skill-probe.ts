@@ -2,7 +2,8 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ProbeCell } from "../shared/api";
 import { t } from "./locale";
-import type { SkillSupport } from "./harness";
+import type { McpSupport, SkillSupport } from "./harness";
+import { readJsonDoc } from "./mcp-config";
 
 /**
  * Cursor and Kiro have no command that lists loaded skills, so we check what they
@@ -79,5 +80,21 @@ export function skillFileCells(harness: string, label: string, support: SkillSup
       return cell("failed", t("skillSessionBlind", { harness: label, path: sessionBlind }));
     }
     return cell("failed", t("skillFileMissing", { harness: label }));
+  });
+}
+
+/** MCP counterpart of the file check, for harnesses with no command that reports server status. */
+export function mcpFileCells(harness: string, label: string, mcp: McpSupport, rootPath: string, names: readonly string[]): ProbeCell[] {
+  const files = [mcp.userPath, ...(mcp.projectPath ? [mcp.projectPath(rootPath)] : [])].filter((path) => existsSync(path));
+  const servers = files.map((path) => ({ path, servers: mcp.format.read(readJsonDoc(path).doc) }));
+  return names.map((name): ProbeCell => {
+    const hit = servers.find((entry) => name in entry.servers);
+    if (!hit) {
+      return { kind: "mcp", name, harness, state: "failed", detail: t("mcpFileMissing", { harness: label }) };
+    }
+    if (hit.servers[name]?.enabled === false) {
+      return { kind: "mcp", name, harness, state: "failed", detail: t("mcpFileDisabled", { path: hit.path }) };
+    }
+    return { kind: "mcp", name, harness, state: "loaded", detail: t("mcpFileFound", { path: hit.path, harness: label }) };
   });
 }

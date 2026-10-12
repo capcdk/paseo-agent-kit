@@ -23,7 +23,21 @@ These results come from live Paseo sessions, using fixture MCP servers and skill
 | Qoder | `~/.qoder/settings.json` | `.mcp.json` | `~/.agents/skills`, `~/.qoder/skills` | `.qoder/skills`, `.agents/skills` |
 | Cursor (ACP in Paseo) | `~/.cursor/mcp.json` | not read (see below) | `~/.cursor/skills`, `~/.agents/skills`, `~/.claude/skills` | not read |
 
-User-level MCP servers are also synced to OpenCode (`~/.config/opencode/opencode.json`) and Oh My Pi (`~/.omp/agent/mcp.json`).
+The harnesses below are managed from their documentation (and, for Claude Code, a live `claude -p` check of project `.mcp.json` and `.claude/skills`). Kimi Code, OpenCode and Oh My Pi were not run end to end:
+
+| Harness | User MCP | Project MCP | User skills | Project skills | Load check |
+|---|---|---|---|---|---|
+| Claude Code | `~/.claude.json` | `.mcp.json` (approved via `.claude/settings.local.json`) | `~/.claude/skills` | `.claude/skills` | `claude mcp list` + file check |
+| OpenCode | `~/.config/opencode/opencode.json` | `opencode.json` | `~/.config/opencode/skills`, `~/.claude/skills`, `~/.agents/skills` | `.opencode/skills`, `.claude/skills`, `.agents/skills` | `opencode mcp list` + file check |
+| Oh My Pi | `~/.omp/agent/mcp.json` | `.omp/mcp.json` | `~/.omp/agent/skills` | `.omp/skills`, `.agents/skills`, `.claude/skills` | file check |
+| Kimi Code | `~/.kimi-code/mcp.json` | `.kimi-code/mcp.json` | `~/.kimi-code/skills`, `~/.agents/skills` | `.kimi-code/skills`, `.agents/skills` | file check |
+| MiniMax Code | `~/.minimax/mcp.json` | not documented | not documented, so skills are not managed | n/a | file check (MCP only) |
+
+Kimi Code and MiniMax Code are only managed once their data directory (`~/.kimi-code`, `~/.minimax`, or `KIMI_CODE_HOME` / `MINIMAX_DATA_DIR`) exists, so Agent Kit never creates it for you.
+
+### Load checks
+
+Cursor, Kiro, Oh My Pi, Kimi Code and MiniMax Code have no command that lists loaded skills or MCP status. For those, and for skills in every harness without one, the dashboard does a **file check**: the skill folder (or MCP entry) must sit in a place the harness reads, with a valid `SKILL.md` (name matching the folder, plus a description). It confirms the file is where the harness looks. It cannot see a harness skipping something for its own reasons.
 
 ### Cursor caveats
 
@@ -39,7 +53,7 @@ User-level MCP servers are also synced to OpenCode (`~/.config/opencode/opencode
 - Skills from every user-level root a harness reads become global; skills in project skill roots are mounted on that project. Copies that resolve to the same directory are imported once.
 - Entries marked `disabled` (Kiro) are imported as disabled.
 
-Import merges by name and never deletes. When two harnesses define the same name differently, the first harness in registry order (Cursor, Kiro, Qoder, OpenCode, Oh My Pi) wins and the dashboard lists the conflict. Import then syncs the catalog, so every harness ends up with the same entries. Each file is backed up before it is rewritten.
+Import merges by name and never deletes. When two harnesses define the same name differently, the first harness in registry order (Cursor, Kiro, Qoder, OpenCode, Oh My Pi, Claude Code, Kimi Code, MiniMax Code) wins and the dashboard lists the conflict. Import then syncs the catalog, so every harness ends up with the same entries. Each file is backed up before it is rewritten.
 
 ## Scopes
 

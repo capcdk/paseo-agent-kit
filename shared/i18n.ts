@@ -65,6 +65,9 @@ const en = {
   skillFileFound: "Found at {path} (file check; {harness} cannot list skills)",
   skillSessionBlind: "{harness} sessions in Paseo ignore project skill directories ({path})",
   skillFileMissing: "Not in any directory {harness} reads (file check)",
+  mcpFileMissing: "Not in any config file {harness} reads (file check)",
+  mcpFileDisabled: "Disabled in {path}",
+  mcpFileFound: "Configured in {path} (file check; {harness} cannot report server status)",
 
   // client: load states
   stateLoaded: "Loaded",
@@ -213,6 +216,9 @@ const zh: Record<MessageKey, string> = {
   skillFileFound: "已在 {path} 找到（文件检查；{harness} 无法列出 skill）",
   skillSessionBlind: "Paseo 中的 {harness} 会话不读取项目级 skill 目录（{path}）",
   skillFileMissing: "{harness} 读取的目录里都没有（文件检查）",
+  mcpFileMissing: "{harness} 读取的配置文件里都没有（文件检查）",
+  mcpFileDisabled: "已在 {path} 中禁用",
+  mcpFileFound: "已在 {path} 中配置（文件检查；{harness} 无法报告服务器状态）",
 
   stateLoaded: "已加载",
   stateApproval: "待信任",

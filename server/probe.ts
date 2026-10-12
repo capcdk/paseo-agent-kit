@@ -19,7 +19,7 @@ export interface CliRun {
 /** Approval/auth before generic failure: Cursor prints `not loaded (needs approval)`. */
 export function classifyLoad(detail: string): LoadState {
   const text = detail.toLowerCase();
-  if (/needs approval|not approved/.test(text)) {
+  if (/needs approval|not approved|pending approval/.test(text)) {
     return "approval";
   }
   if (/needs auth|unauthorized|not logged in|please log ?in|authentication required/.test(text)) {
