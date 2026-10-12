@@ -34,7 +34,7 @@ import {
   setUserLevel,
   throwIfFailed,
 } from "./server/mount";
-import { deleteSkillSource, detachSkillSource, detachTarget, readProjects, skillDeleteBlocker, syncSkills } from "./server/skills";
+import { deleteSkillSource, detachSkillSource, detachTarget, normalizeNpxOwned, readProjects, skillDeleteBlocker, syncSkills } from "./server/skills";
 
 function projectForCwd(cwd: string): string | null {
   let best: { projectId: string; length: number } | null = null;
@@ -87,6 +87,9 @@ export default function contribute(server: PluginServerContext) {
   let reconciledFor = "";
   server.handle(kitStatusRpc, async ({ deviceLocale }) => {
     setDeviceLocale(deviceLocale);
+    if (normalizeNpxOwned()) {
+      syncSkills();
+    }
     const installed = harnesses().map((harness) => harness.id).join(",");
     if (installed !== reconciledFor) {
       reconciledFor = installed;
@@ -138,6 +141,7 @@ export default function contribute(server: PluginServerContext) {
 
   server.handle(importRpc, async () => {
     const result = importFromHarnesses();
+    normalizeNpxOwned();
     const sync = syncSkills();
     return { ...result, failed: [...result.failed, ...sync.failed] };
   });
@@ -244,6 +248,7 @@ export default function contribute(server: PluginServerContext) {
       throw new Error(t("npxCommandFailed", { detail: npxOutputTail(run) }));
     }
     const result = importFromHarnesses();
+    normalizeNpxOwned();
     const sync = syncSkills();
     const added = loadKitStore()
       .skills.map((entry) => entry.name)

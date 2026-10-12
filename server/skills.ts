@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync,
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readJsonDoc } from "./mcp-config";
-import { loadKitStore } from "./kit-store";
+import { loadKitStore, saveKitStore } from "./kit-store";
 import { autoScannedUserSkillRoots, harnesses, projectSkillRoots } from "./harness";
 import { t } from "./locale";
 import { isNpxOwned } from "./npx";
@@ -102,6 +102,29 @@ function userLinkRoots(): string[] {
 
 function projectLinkRoots(dir: string): string[] {
   return harnesses().flatMap((harness) => (harness.skills?.projectLink ? [harness.skills.projectLink(dir)] : []));
+}
+
+/**
+ * Skills installed by `npx skills -g` live in ~/.agents/skills, which several harnesses
+ * read by themselves, so they are global whatever the catalog says. Bring the catalog in
+ * line (an older project-only entry for the same name would otherwise keep Global off while
+ * those harnesses load it anyway, and the harnesses that don't scan that folder never get a link).
+ * Returns whether anything changed.
+ */
+export function normalizeNpxOwned(): boolean {
+  const store = loadKitStore();
+  let changed = false;
+  const skills = store.skills.map((def) => {
+    if (!isNpxOwned(def.name) || (def.userLevel && def.enabled)) {
+      return def;
+    }
+    changed = true;
+    return { ...def, userLevel: true, enabled: true, projectIds: [] };
+  });
+  if (changed) {
+    saveKitStore({ ...store, skills });
+  }
+  return changed;
 }
 
 export interface SkillSyncResult {
