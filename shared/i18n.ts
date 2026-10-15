@@ -64,6 +64,7 @@ const en = {
   skillBrokenLink: "Broken link: {path}",
   skillInvalid: "{path} is not a valid skill: {reason}",
   skillFileFound: "Found at {path} (file check; {harness} cannot list skills)",
+  skillViaIndex: "Listed in the Agent Kit project index ({path}); {harness} reads it on demand",
   skillSessionBlind: "{harness} sessions in Paseo ignore project skill directories ({path})",
   skillFileMissing: "Not in any directory {harness} reads (file check)",
   mcpFileMissing: "Not in any config file {harness} reads (file check)",
@@ -137,7 +138,7 @@ const en = {
   // client: rows
   rowExpand: "Show load details for {name}",
   rowCollapse: "Hide load details for {name}",
-  projectOnlyBlind: "Project only: unavailable in {harnesses} sessions",
+  projectOnlyBlind: "Project only: {harnesses} sessions get it through the Agent Kit project index (read on demand)",
   trust: "Trust in {harness}",
   global: "Global",
   project: "Project",
@@ -216,6 +217,7 @@ const zh: Record<MessageKey, string> = {
   skillBrokenLink: "链接已失效：{path}",
   skillInvalid: "{path} 不是有效的 skill：{reason}",
   skillFileFound: "已在 {path} 找到（文件检查；{harness} 无法列出 skill）",
+  skillViaIndex: "已列入 Agent Kit 项目索引（{path}），{harness} 按需读取",
   skillSessionBlind: "Paseo 中的 {harness} 会话不读取项目级 skill 目录（{path}）",
   skillFileMissing: "{harness} 读取的目录里都没有（文件检查）",
   mcpFileMissing: "{harness} 读取的配置文件里都没有（文件检查）",
@@ -282,7 +284,7 @@ const zh: Record<MessageKey, string> = {
 
   rowExpand: "展开 {name} 的加载详情",
   rowCollapse: "收起 {name} 的加载详情",
-  projectOnlyBlind: "仅项目级：{harnesses} 会话中不可用",
+  projectOnlyBlind: "仅项目级：{harnesses} 会话通过 Agent Kit 项目索引按需读取",
   trust: "在 {harness} 信任",
   global: "全局",
   project: "项目",

@@ -12,6 +12,17 @@ import { readJsonDoc } from "./mcp-config";
  * it cannot see a harness that skips a skill for its own reasons.
  */
 
+/** Name of the generated skill that tells a harness about project skills it cannot load by itself. */
+export const PROJECT_INDEX_NAME = "agent-kit-project-skills";
+
+function listedInProjectIndex(support: SkillSupport, name: string, dir: string): boolean {
+  try {
+    return readFileSync(join(support.userLink, PROJECT_INDEX_NAME, "SKILL.md"), "utf8").includes(`- ${name}:`) && existsSync(dir);
+  } catch {
+    return false;
+  }
+}
+
 function frontmatterProblem(dir: string, name: string): string | null {
   let text: string;
   try {
@@ -77,6 +88,9 @@ export function skillFileCells(harness: string, label: string, support: SkillSup
       return cell("failed", problem);
     }
     if (sessionBlind) {
+      if (listedInProjectIndex(support, name, sessionBlind)) {
+        return cell("loaded", t("skillViaIndex", { harness: label, path: sessionBlind }));
+      }
       return cell("failed", t("skillSessionBlind", { harness: label, path: sessionBlind }));
     }
     return cell("failed", t("skillFileMissing", { harness: label }));

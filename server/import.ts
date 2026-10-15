@@ -5,7 +5,7 @@ import { harnesses, type HarnessDef } from "./harness";
 import { loadKitStore, saveKitStore } from "./kit-store";
 import { readJsonDoc, serversEqual } from "./mcp-config";
 import { canonicalSkillPath, isNpxOwned } from "./npx";
-import { listSkillsInRoot, readProjects, treesIdentical } from "./skills";
+import { listSkillsInRoot, PROJECT_INDEX_NAME, readProjects, treesIdentical } from "./skills";
 import { applySync } from "./sync";
 
 export interface ImportResult {
@@ -114,7 +114,7 @@ export function importFromHarnesses(): ImportResult {
   let skillCount = 0;
   const takeSkill = (name: string, sourcePath: string, projectId: string | null) => {
     const real = realPath(sourcePath);
-    if (!real) {
+    if (!real || name === PROJECT_INDEX_NAME) {
       return;
     }
     const existing = skillByName.get(name);
