@@ -34,7 +34,16 @@ import {
   setUserLevel,
   throwIfFailed,
 } from "./server/mount";
-import { deleteSkillSource, detachSkillSource, detachTarget, normalizeNpxOwned, readProjects, skillDeleteBlocker, syncSkills } from "./server/skills";
+import {
+  deleteSkillSource,
+  detachSkillSource,
+  detachTarget,
+  normalizeNpxOwned,
+  readProjects,
+  skillDeleteBlocker,
+  skillDescription,
+  syncSkills,
+} from "./server/skills";
 
 function projectForCwd(cwd: string): string | null {
   let best: { projectId: string; length: number } | null = null;
@@ -53,18 +62,23 @@ export default function contribute(server: PluginServerContext) {
   // - sessions of harnesses that ignore project MCP files also get the
   //   non-global servers mounted on the project that owns their cwd.
   server.before("agent.create", ({ request }) => {
-    const { servers } = loadKitStore();
-    const ignoresProjectMcp = harnesses().some(
-      (harness) => !harness.mcp.projectLoaded && harness.providerPattern?.test(request.config.provider),
-    );
-    const projectId = ignoresProjectMcp ? projectForCwd(request.config.cwd) : null;
+    const { servers, skills } = loadKitStore();
+    const matching = harnesses().filter((harness) => harness.providerPattern?.test(request.config.provider));
+    const ignoresProjectMcp = matching.some((harness) => !harness.mcp.projectLoaded);
+    const ignoresProjectSkills = matching.some((harness) => harness.skills !== null && !harness.skills.projectLoaded);
+    const projectId = ignoresProjectMcp || ignoresProjectSkills ? projectForCwd(request.config.cwd) : null;
     const injectable = servers.filter(
       (def) =>
         def.enabled &&
         (def.url || def.command) &&
-        (def.sessionInject || (projectId !== null && !def.userLevel && def.projectIds.includes(projectId))),
+        (def.sessionInject || (ignoresProjectMcp && projectId !== null && !def.userLevel && def.projectIds.includes(projectId))),
     );
-    if (injectable.length === 0) {
+    // Such harnesses never look in project skill directories, so tell the model where this project's skills are.
+    const projectSkills =
+      ignoresProjectSkills && projectId !== null
+        ? skills.filter((def) => def.enabled && !def.userLevel && def.projectIds.includes(projectId) && existsSync(def.sourcePath))
+        : [];
+    if (injectable.length === 0 && projectSkills.length === 0) {
       return;
     }
     const injected: NonNullable<(typeof request)["config"]["mcpServers"]> = {};
@@ -73,11 +87,19 @@ export default function contribute(server: PluginServerContext) {
         ? { type: def.transport === "sse" ? "sse" : "http", url: def.url, ...(def.headers ? { headers: def.headers } : {}) }
         : { type: "stdio", command: def.command ?? "", args: def.args ?? [], ...(def.env ? { env: def.env } : {}) };
     }
+    const skillNote =
+      projectSkills.length > 0
+        ? [
+            "This project has skills that are not auto-loaded in this session. When a task matches one of them, read its SKILL.md first and follow it:",
+            ...projectSkills.map((def) => `- ${def.name}: ${skillDescription(def.sourcePath).slice(0, 300)} (${def.sourcePath.replace(/\/+$/, "")}/SKILL.md)`),
+          ].join("\n")
+        : null;
     return {
       ...request,
       config: {
         ...request.config,
         mcpServers: { ...(request.config.mcpServers ?? {}), ...injected },
+        ...(skillNote ? { systemPrompt: [request.config.systemPrompt, skillNote].filter(Boolean).join("\n\n") } : {}),
       },
     };
   });

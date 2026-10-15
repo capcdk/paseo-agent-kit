@@ -363,6 +363,39 @@ export function deleteSkillSource(sourcePath: string): void {
   }
 }
 
+/** One-line description from a SKILL.md frontmatter; handles inline, quoted and `>-` / `|` block values. */
+export function skillDescription(dir: string): string {
+  let text: string;
+  try {
+    text = readFileSync(join(dir, "SKILL.md"), "utf8");
+  } catch {
+    return "";
+  }
+  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1];
+  if (block === undefined) {
+    return "";
+  }
+  const lines = block.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^description:/.test(line));
+  if (start < 0) {
+    return "";
+  }
+  const first = lines[start].replace(/^description:\s*/, "").trim();
+  let value = first;
+  if (/^[>|][+-]?$/.test(first) || first === "") {
+    const parts: string[] = [];
+    for (const line of lines.slice(start + 1)) {
+      if (line.trim() !== "" && !/^\s/.test(line)) {
+        break;
+      }
+      parts.push(line.trim());
+    }
+    value = parts.filter(Boolean).join(" ");
+  }
+  const quoted = /^(["'])(.*)\1$/.exec(value);
+  return (quoted ? quoted[2] : value).replace(/\s+/g, " ").trim();
+}
+
 /** YAML allows quoted names (`name: "foo"`); the quotes must not leak into paths. */
 function unquoteYamlScalar(value: string): string {
   const match = /^(["'])(.*)\1$/.exec(value);
