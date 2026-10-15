@@ -41,7 +41,7 @@ Cursor, Kiro, Oh My Pi, Kimi Code and MiniMax Code have no command that lists lo
 
 ### Cursor caveats
 
-- **Cursor in ACP mode ignores project-level config.** For Cursor sessions, Agent Kit injects the project's non-global MCP servers into the session through `agent.create`, based on the session's working directory. Paseo has no skill-injection API, so project-only skills are **not** available in Cursor sessions. The dashboard warns about this.
+- **Cursor in ACP mode ignores project-level config.** For Cursor sessions, Agent Kit injects the project's non-global MCP servers into the session through `agent.create`, based on the session's working directory. Paseo has no skill-injection API (the `systemPrompt` it passes is not read by Cursor), so Agent Kit writes a small index skill, `~/.cursor/skills/agent-kit-project-skills`, listing each project's project-only skills with their descriptions and paths. Cursor loads it as a user skill, and the model opens the matching `SKILL.md` on demand when the working directory is in that project. It is regenerated on every sync and removed when no project-only skills remain. Verified in a live Cursor session (Auto model): asked which skill estimates sprint story points, the model read the index and returned the right skill and path.
 - **The Cursor CLI and IDE gate project MCP servers behind approval.** When a server is mounted on a project, Agent Kit runs `agent mcp enable <name>` there. For servers shown as "pending trust", a **Trust** button runs the same command. Approval keys include a hash of the config, so editing a server re-approves it.
 - In Cursor, a project entry shadows the user entry with the same name and needs approval. So global servers are never also written to project files.
 
